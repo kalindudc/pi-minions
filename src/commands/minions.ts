@@ -57,7 +57,7 @@ function sendDirective(pi: ExtensionAPI, ctx: ExtensionCommandContext, directive
   }
 }
 
-export function makeMinionsHandler(
+export function createMinionsHandler(
   tree: AgentTree,
   pi: ExtensionAPI,
   detachHandles: Map<string, DetachHandle>,

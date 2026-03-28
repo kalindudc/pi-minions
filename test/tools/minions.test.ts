@@ -1,23 +1,23 @@
 import { describe, it, expect, vi } from "vitest";
 import { AgentTree } from "../../src/tree.js";
 import { ResultQueue } from "../../src/queue.js";
-import { makeListMinionsExecute, makeShowMinionExecute, makeSteerMinionExecute } from "../../src/tools/minions.js";
+import { listMinions, showMinion, steerMinion } from "../../src/tools/minions.js";
 import type { DetachHandle } from "../../src/tools/spawn.js";
 import type { MinionSession } from "../../src/spawn.js";
 import { emptyUsage } from "../../src/types.js";
 
-function makeCtx() {
+function createCtx() {
   return { cwd: "/tmp", modelRegistry: {}, model: undefined, ui: { setWorkingMessage: vi.fn() } } as any;
 }
 
-describe("makeListMinionsExecute", () => {
+describe("listMinions", () => {
   it("returns message when no minions", async () => {
     const tree = new AgentTree();
     const queue = new ResultQueue();
     const detachHandles = new Map<string, DetachHandle>();
-    const execute = makeListMinionsExecute(tree, queue, detachHandles);
+    const execute = listMinions(tree, queue, detachHandles);
 
-    const result = await execute("tc-1", {}, undefined, undefined, makeCtx());
+    const result = await execute("tc-1", {}, undefined, undefined, createCtx());
     const text = (result.content[0] as any).text;
     expect(text).toContain("No running or pending");
   });
@@ -31,8 +31,8 @@ describe("makeListMinionsExecute", () => {
     tree.add("b", "bob", "task B");
     detachHandles.set("a", { resolve: () => {} }); // kevin is foreground
 
-    const execute = makeListMinionsExecute(tree, queue, detachHandles);
-    const result = await execute("tc-1", {}, undefined, undefined, makeCtx());
+    const execute = listMinions(tree, queue, detachHandles);
+    const result = await execute("tc-1", {}, undefined, undefined, createCtx());
     const text = (result.content[0] as any).text;
 
     expect(text).toContain("kevin");
@@ -52,8 +52,8 @@ describe("makeListMinionsExecute", () => {
       duration: 1000, exitCode: 0,
     });
 
-    const execute = makeListMinionsExecute(tree, queue, detachHandles);
-    const result = await execute("tc-1", {}, undefined, undefined, makeCtx());
+    const execute = listMinions(tree, queue, detachHandles);
+    const result = await execute("tc-1", {}, undefined, undefined, createCtx());
     const text = (result.content[0] as any).text;
 
     expect(text).toContain("mel");
@@ -61,14 +61,14 @@ describe("makeListMinionsExecute", () => {
   });
 });
 
-describe("makeShowMinionExecute", () => {
+describe("showMinion", () => {
   it("throws for unknown minion", async () => {
     const tree = new AgentTree();
     const queue = new ResultQueue();
-    const execute = makeShowMinionExecute(tree, queue);
+    const execute = showMinion(tree, queue);
 
     await expect(
-      execute("tc-1", { target: "nope" }, undefined, undefined, makeCtx()),
+      execute("tc-1", { target: "nope" }, undefined, undefined, createCtx()),
     ).rejects.toThrow(/not found/);
   });
 
@@ -78,8 +78,8 @@ describe("makeShowMinionExecute", () => {
     tree.add("a", "kevin", "analyze code");
     tree.updateActivity("a", "→ $ grep -r TODO");
 
-    const execute = makeShowMinionExecute(tree, queue);
-    const result = await execute("tc-1", { target: "kevin" }, undefined, undefined, makeCtx());
+    const execute = showMinion(tree, queue);
+    const result = await execute("tc-1", { target: "kevin" }, undefined, undefined, createCtx());
     const text = (result.content[0] as any).text;
 
     expect(text).toContain("kevin");
@@ -100,8 +100,8 @@ describe("makeShowMinionExecute", () => {
       duration: 5000, exitCode: 0,
     });
 
-    const execute = makeShowMinionExecute(tree, queue);
-    const result = await execute("tc-1", { target: "a" }, undefined, undefined, makeCtx());
+    const execute = showMinion(tree, queue);
+    const result = await execute("tc-1", { target: "a" }, undefined, undefined, createCtx());
     const text = (result.content[0] as any).text;
 
     expect(text).toContain("completed");
@@ -113,21 +113,21 @@ describe("makeShowMinionExecute", () => {
     const queue = new ResultQueue();
     tree.add("abc123", "kevin", "task");
 
-    const execute = makeShowMinionExecute(tree, queue);
-    const result = await execute("tc-1", { target: "kevin" }, undefined, undefined, makeCtx());
+    const execute = showMinion(tree, queue);
+    const result = await execute("tc-1", { target: "kevin" }, undefined, undefined, createCtx());
     const text = (result.content[0] as any).text;
     expect(text).toContain("abc123");
   });
 });
 
-describe("makeSteerMinionExecute", () => {
+describe("steerMinion", () => {
   it("throws for unknown minion", async () => {
     const tree = new AgentTree();
     const sessions = new Map<string, MinionSession>();
-    const execute = makeSteerMinionExecute(tree, sessions);
+    const execute = steerMinion(tree, sessions);
 
     await expect(
-      execute("tc-1", { target: "nope", message: "hello" }, undefined, undefined, makeCtx()),
+      execute("tc-1", { target: "nope", message: "hello" }, undefined, undefined, createCtx()),
     ).rejects.toThrow(/not found/);
   });
 
@@ -137,9 +137,9 @@ describe("makeSteerMinionExecute", () => {
     tree.add("a", "kevin", "task");
     tree.updateStatus("a", "completed", 0);
 
-    const execute = makeSteerMinionExecute(tree, sessions);
+    const execute = steerMinion(tree, sessions);
     await expect(
-      execute("tc-1", { target: "a", message: "hello" }, undefined, undefined, makeCtx()),
+      execute("tc-1", { target: "a", message: "hello" }, undefined, undefined, createCtx()),
     ).rejects.toThrow(/not running/);
   });
 
@@ -148,9 +148,9 @@ describe("makeSteerMinionExecute", () => {
     const sessions = new Map<string, MinionSession>();
     tree.add("a", "kevin", "task");
 
-    const execute = makeSteerMinionExecute(tree, sessions);
+    const execute = steerMinion(tree, sessions);
     await expect(
-      execute("tc-1", { target: "a", message: "hello" }, undefined, undefined, makeCtx()),
+      execute("tc-1", { target: "a", message: "hello" }, undefined, undefined, createCtx()),
     ).rejects.toThrow(/No active session/);
   });
 
@@ -161,10 +161,10 @@ describe("makeSteerMinionExecute", () => {
     tree.add("a", "kevin", "task");
     sessions.set("a", { steer: steerFn });
 
-    const execute = makeSteerMinionExecute(tree, sessions);
+    const execute = steerMinion(tree, sessions);
     const result = await execute(
       "tc-1", { target: "kevin", message: "restart the count" },
-      undefined, undefined, makeCtx(),
+      undefined, undefined, createCtx(),
     );
     const text = (result.content[0] as any).text;
 

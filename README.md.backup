@@ -1,0 +1,225 @@
+# pi-minions
+
+Minimal recursive subagent orchestration for pi. No bundled agents, no opinions.
+
+## Quick Start
+
+**Install from GitHub:**
+
+```bash
+pi install https://github.com/kalindudc/pi-minions
+```
+
+**Or install locally for development:**
+
+```bash
+git clone https://github.com/kalindudc/pi-minions.git
+pi install ./pi-minions
+```
+
+Spawn a minion:
+```bash
+# Foreground (blocks parent until complete)
+/spawn Research the latest TypeScript 5.7 features
+
+# Background (returns immediately, queues result)
+/spawn --bg Refactor the auth module for better testability
+```
+
+## Features
+
+- **In-process sessions** - no child processes, streaming progress, clean abort
+- **Foreground & background modes** - block parent or fire-and-forget
+- **Live detach** - send running minions to background without interruption
+- **Steering** - inject messages into running minions mid-execution
+- **Agent discovery** - use named agents from `~/.pi/agent/agents/` or ephemeral minions
+- **Result queue** - auto-delivery of background results to parent LLM
+- **Hierarchical tracking** - tree structure for nested spawning
+- **Transcript logging** - full conversation logs per minion
+
+## Core Concepts
+
+### Minions
+
+A minion is an isolated pi agent session running in-process. It has:
+- Own conversation context (separate from parent)
+- Built-in tools only (read, bash, edit, write, grep, find, ls)
+- No extensions (prevents recursive spawning)
+- Fail-fast system prompt (STOP on failure, no fabrication)
+
+### Foreground vs Background
+
+| Mode | Use When | Parent Behavior | Result Delivery |
+|------|----------|-----------------|-----------------|
+| **Foreground** | Need result immediately | Blocks until complete | Tool call result in conversation |
+| **Background** | Long-running, parallel work | Returns immediately | Auto-delivered to LLM when done |
+
+### Named vs Ephemeral Agents
+
+```bash
+# Ephemeral (default) - uses built-in minion template
+/spawn Analyze the error logs
+
+# Named - uses custom agent from disk
+/spawn --agent scout Find all TODO comments in src/
+```
+
+Agents are discovered from:
+- `~/.pi/agent/agents/`
+- `.pi/agents/`
+
+## Commands & Tools
+
+### Commands (User-Initiated)
+
+| Command | Description |
+|---------|-------------|
+| `/spawn [--bg] [--agent NAME] [--model MODEL] <task>` | Spawn a minion |
+| `/minions` or `/minions list` | Show running minions and pending results |
+| `/minions show <id\|name>` | Detailed view of a minion |
+| `/minions bg <id\|name>` | Send running minion to background |
+| `/minions steer <id\|name> <message>` | Inject message into running minion |
+
+### Tools (LLM-Callable)
+
+| Tool | Description |
+|------|-------------|
+| `spawn` | Delegate task to foreground minion |
+| `spawn_bg` | Delegate task to background minion |
+| `halt` | Abort running minion(s) by ID/name |
+| `list_agents` | Discover available named agents |
+| `list_minions` | List running minions and pending results |
+| `show_minion` | Get detailed minion status |
+| `steer_minion` | Send steering message to running minion |
+
+See [docs/reference.md](docs/reference.md) for detailed API documentation.
+
+## Common Patterns
+
+### Parallel Research
+```bash
+/spawn --bg Research React 19 server components
+/spawn --bg Research Next.js 15 migration guide
+/spawn --bg Research Vercel deployment best practices
+# All three run in parallel, results auto-delivered
+```
+
+### Sequential Work with Detach
+```bash
+/spawn Analyze the codebase and create refactoring plan
+# Later, while planning is running...
+/minions bg planning-minion
+# Parent unlocks, minion continues, result queued
+```
+
+### Steering Running Minions
+```bash
+/spawn --bg Run full test suite and analyze failures
+# Later, adjust scope mid-run...
+/minions steer test-runner "Focus only on integration tests"
+```
+
+See [docs/patterns.md](docs/patterns.md) for more usage patterns and workflows.
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PI_MINIONS_DEBUG` | Enable debug logging to `tmp/logs/debug.log` | `0` |
+
+## Logging
+
+- **Debug log**: `tmp/logs/debug.log` (when `PI_MINIONS_DEBUG=1`)
+- **Transcripts**: `tmp/logs/minions/<id>-<name>.log` (per-minion conversation)
+
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Type check
+npm run typecheck
+
+# Watch tests
+npm run test:watch
+```
+
+### Creating a Release
+
+This project uses git-based releases with semantic versioning and a two-step process:
+
+**Step 1: Prepare release (in pi)**
+```bash
+/prompt release
+```
+This analyzes commits, generates CHANGELOG, and updates files.
+
+**Step 2: Finalize release (in terminal)**
+```bash
+./scripts/release.sh
+```
+This reads the version from package.json, creates the commit, tag, and pushes to GitHub.
+
+The workflow:
+1. Analyzes commits since last tag
+2. Parses conventional commit messages (`feat:`, `fix:`, etc.)
+3. Auto-determines version bump (major/minor/patch)
+4. Generates CHANGELOG entry
+5. Updates `package.json` and `CHANGELOG.md`
+6. Shows diff for your review
+7. You run the script to finalize
+
+### Conventional Commits
+
+This project uses [conventional commits](https://www.conventionalcommits.org/) for releases:
+
+- `feat:` - New features (minor version bump)
+- `fix:` - Bug fixes (patch version bump)  
+- `docs:` - Documentation changes (patch version bump)
+- `chore:` - Maintenance tasks (patch version bump)
+- `test:` - Test updates (patch version bump)
+- `BREAKING CHANGE:` or `!` - Breaking changes (major version bump)
+
+Examples:
+```bash
+# Single change
+git commit -m "feat: add session resume support"
+
+# Multiple changes in one commit
+git commit -m "feat: add live detach support
+
+Also fixes minion name persistence bug and updates documentation."
+
+# Breaking change
+git commit -m "feat!: change spawn API
+
+BREAKING CHANGE: spawn now returns status instead of exitCode"
+```
+
+**Note:** A single commit can include multiple types of changes. The release workflow will parse commit bodies to extract all changes.
+
+### Updating Documentation
+
+Review and update documentation after implementation changes:
+
+```bash
+# In pi session
+/prompt update-docs
+```
+
+This audits all docs against current implementation and proposes updates.
+
+## Documentation
+
+- [Reference](docs/reference.md) - Complete API documentation
+- [Patterns](docs/patterns.md) - Usage patterns and workflows
+- [Roadmap](docs/roadmap.md) - Planned features and progress
+- [Changelog](CHANGELOG.md) - Version history
+
+## License
+
+MIT - see [LICENSE.md](LICENSE.md)

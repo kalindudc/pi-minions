@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { AgentTree } from "../../src/tree.js";
-import { makeHaltExecute, abortAgents } from "../../src/tools/halt.js";
+import { halt, abortAgents } from "../../src/tools/halt.js";
 
-function makeCtx() {
+function createCtx() {
   return { cwd: "/tmp" } as any;
 }
 
@@ -51,7 +51,7 @@ describe("abortAgents", () => {
   });
 });
 
-describe("makeHaltExecute", () => {
+describe("halt", () => {
   let tree: AgentTree;
   let handles: Map<string, AbortController>;
 
@@ -63,9 +63,9 @@ describe("makeHaltExecute", () => {
   it("halts a specific running agent by id", async () => {
     tree.add("id1", "bob", "task");
     handles.set("id1", mockController());
-    const execute = makeHaltExecute(tree, handles);
+    const execute = halt(tree, handles);
 
-    const result = await execute("tc", { id: "id1" }, undefined, undefined, makeCtx());
+    const result = await execute("tc", { id: "id1" }, undefined, undefined, createCtx());
 
     expect(tree.get("id1")!.status).toBe("aborted");
     const text = (result.content[0] as { type: "text"; text: string }).text;
@@ -77,9 +77,9 @@ describe("makeHaltExecute", () => {
     tree.add("b", "kevin", "t2");
     handles.set("a", mockController());
     handles.set("b", mockController());
-    const execute = makeHaltExecute(tree, handles);
+    const execute = halt(tree, handles);
 
-    const result = await execute("tc", { id: "all" }, undefined, undefined, makeCtx());
+    const result = await execute("tc", { id: "all" }, undefined, undefined, createCtx());
 
     expect(tree.get("a")!.status).toBe("aborted");
     expect(tree.get("b")!.status).toBe("aborted");
@@ -88,28 +88,28 @@ describe("makeHaltExecute", () => {
   });
 
   it("throws for unknown agent id", async () => {
-    const execute = makeHaltExecute(tree, handles);
+    const execute = halt(tree, handles);
 
     await expect(
-      execute("tc", { id: "nope" }, undefined, undefined, makeCtx()),
+      execute("tc", { id: "nope" }, undefined, undefined, createCtx()),
     ).rejects.toThrow(/nope/);
   });
 
   it("returns info (not error) for already-completed agent", async () => {
     tree.add("id1", "bob", "task");
     tree.updateStatus("id1", "completed", 0);
-    const execute = makeHaltExecute(tree, handles);
+    const execute = halt(tree, handles);
 
-    const result = await execute("tc", { id: "id1" }, undefined, undefined, makeCtx());
+    const result = await execute("tc", { id: "id1" }, undefined, undefined, createCtx());
 
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("completed");
   });
 
   it("returns info when 'all' but nothing is running", async () => {
-    const execute = makeHaltExecute(tree, handles);
+    const execute = halt(tree, handles);
 
-    const result = await execute("tc", { id: "all" }, undefined, undefined, makeCtx());
+    const result = await execute("tc", { id: "all" }, undefined, undefined, createCtx());
 
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("No");

@@ -14,7 +14,7 @@ import type { DetachHandle } from "./spawn.js";
 export const ListMinionsParams = Type.Object({});
 export type ListMinionsParams = Static<typeof ListMinionsParams>;
 
-export function makeListMinionsExecute(
+export function listMinions(
   tree: AgentTree,
   queue: ResultQueue,
   detachHandles: Map<string, DetachHandle>,
@@ -62,7 +62,7 @@ export const SteerMinionParams = Type.Object({
 });
 export type SteerMinionParams = Static<typeof SteerMinionParams>;
 
-export function makeSteerMinionExecute(
+export function steerMinion(
   tree: AgentTree,
   sessions: Map<string, MinionSession>,
 ) {
@@ -101,7 +101,7 @@ export const ShowMinionParams = Type.Object({
 });
 export type ShowMinionParams = Static<typeof ShowMinionParams>;
 
-export function makeShowMinionExecute(
+export function showMinion(
   tree: AgentTree,
   queue: ResultQueue,
 ) {

@@ -1,19 +1,19 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { AgentTree } from "./tree.js";
 import { ResultQueue } from "./queue.js";
-import { SpawnToolParams, SpawnBgToolParams, makeSpawnExecute, makeSpawnBgExecute } from "./tools/spawn.js";
+import { SpawnToolParams, SpawnBgToolParams, spawn, spawnBg } from "./tools/spawn.js";
 import type { DetachHandle } from "./tools/spawn.js";
 import type { MinionSession } from "./spawn.js";
-import { HaltToolParams, makeHaltExecute } from "./tools/halt.js";
-import { ListAgentsParams, makeListAgentsExecute } from "./tools/list-agents.js";
+import { HaltToolParams, halt } from "./tools/halt.js";
+import { ListAgentsParams, listAgents } from "./tools/list-agents.js";
 import {
-  ListMinionsParams, makeListMinionsExecute,
-  SteerMinionParams, makeSteerMinionExecute,
-  ShowMinionParams, makeShowMinionExecute,
+  ListMinionsParams, listMinions,
+  SteerMinionParams, steerMinion,
+  ShowMinionParams, showMinion,
 } from "./tools/minions.js";
-import { makeSpawnHandler } from "./commands/spawn.js";
-import { makeHaltHandler } from "./commands/halt.js";
-import { makeMinionsHandler } from "./commands/minions.js";
+import { createSpawnHandler } from "./commands/spawn.js";
+import { createHaltHandler } from "./commands/halt.js";
+import { createMinionsHandler } from "./commands/minions.js";
 import { renderCall, renderResult } from "./render.js";
 import { logger, LOG_FILE } from "./logger.js";
 
@@ -44,7 +44,7 @@ export default function (pi: ExtensionAPI): void {
       "When a spawn result says [HALTED], the user intentionally stopped the minion. Do NOT retry, re-spawn, or ask about it. Acknowledge and move on.",
     ],
     parameters: SpawnToolParams,
-    execute: makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions),
+    execute: spawn(tree, handles, detachHandles, queue, pi, sessions),
     renderCall,
     renderResult,
   });
@@ -62,7 +62,7 @@ export default function (pi: ExtensionAPI): void {
       "For normal task delegation, use spawn (foreground) instead.",
     ],
     parameters: SpawnBgToolParams,
-    execute: makeSpawnBgExecute(tree, handles, queue, pi, sessions),
+    execute: spawnBg(tree, handles, queue, pi, sessions),
   });
 
   pi.registerTool({
@@ -71,7 +71,7 @@ export default function (pi: ExtensionAPI): void {
     description: "List available agents that can be spawned as minions.",
     promptSnippet: "List available agents for spawning",
     parameters: ListAgentsParams,
-    execute: makeListAgentsExecute(),
+    execute: listAgents(),
   });
 
   pi.registerTool({
@@ -80,7 +80,7 @@ export default function (pi: ExtensionAPI): void {
     description:
       "Abort a running minion by ID. Use id='all' to halt all running minions.",
     parameters: HaltToolParams,
-    execute: makeHaltExecute(tree, handles),
+    execute: halt(tree, handles),
   });
 
   pi.registerTool({
@@ -89,7 +89,7 @@ export default function (pi: ExtensionAPI): void {
     description: "List all running and pending minions with their status and current activity.",
     promptSnippet: "Check on running minions",
     parameters: ListMinionsParams,
-    execute: makeListMinionsExecute(tree, queue, detachHandles),
+    execute: listMinions(tree, queue, detachHandles),
   });
 
   pi.registerTool({
@@ -97,7 +97,7 @@ export default function (pi: ExtensionAPI): void {
     label: "Show Minion",
     description: "Show detailed status, activity, and output of a minion by ID or name.",
     parameters: ShowMinionParams,
-    execute: makeShowMinionExecute(tree, queue),
+    execute: showMinion(tree, queue),
   });
 
   pi.registerTool({
@@ -106,22 +106,22 @@ export default function (pi: ExtensionAPI): void {
     description: "Send a steering message to a running minion. The message is injected into the minion's context before its next LLM call.",
     promptSnippet: "Redirect a running minion with new instructions",
     parameters: SteerMinionParams,
-    execute: makeSteerMinionExecute(tree, sessions),
+    execute: steerMinion(tree, sessions),
   });
 
   pi.registerCommand("spawn", {
     description: "Spawn a minion: /spawn <task> [--model <model>] [--bg]",
-    handler: makeSpawnHandler(pi),
+    handler: createSpawnHandler(pi),
   });
 
   pi.registerCommand("minions", {
     description: "Manage minions: /minions [list|show|bg|steer] [id|name] [message]",
-    handler: makeMinionsHandler(tree, pi, detachHandles),
+    handler: createMinionsHandler(tree, pi, detachHandles),
   });
 
   pi.registerCommand("halt", {
     description: "Halt minion(s): /halt <id | name | all>",
-    handler: makeHaltHandler(tree, handles),
+    handler: createHaltHandler(tree, handles),
   });
 
   // Track model changes so we always know what model is active

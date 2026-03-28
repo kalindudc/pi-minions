@@ -1,6 +1,6 @@
 {
   "name": "pi-minions",
-  "version": "0.3.0",
+  "version": "0.0.0",
   "description": "Minimal recursive subagent orchestration for pi. No bundled agents, no opinions.",
   "type": "module",
   "keywords": ["pi-package", "pi", "pi-extension", "subagent", "agent", "orchestration"],
@@ -12,7 +12,7 @@
   "pi": {
     "extensions": ["./src/index.ts"]
   },
-  "files": ["src/", "README.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["src/", "docs/", "README.md", "CHANGELOG.md", "LICENSE.md"],
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*",

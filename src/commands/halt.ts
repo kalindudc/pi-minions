@@ -2,7 +2,7 @@ import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { AgentTree } from "../tree.js";
 import { abortAgents } from "../tools/halt.js";
 
-export function makeHaltHandler(
+export function createHaltHandler(
   tree: AgentTree,
   handles: Map<string, AbortController>,
 ) {

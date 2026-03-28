@@ -12,7 +12,7 @@ export interface AgentInfo {
   model?: string;
 }
 
-export function makeListAgentsExecute() {
+export function listAgents() {
   return async function execute(
     _toolCallId: string,
     _params: Record<string, never>,

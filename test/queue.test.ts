@@ -3,7 +3,7 @@ import { ResultQueue } from "../src/queue.js";
 import type { QueuedResult } from "../src/types.js";
 import { emptyUsage } from "../src/types.js";
 
-function makeResult(overrides?: Partial<QueuedResult>): QueuedResult {
+function createResult(overrides?: Partial<QueuedResult>): QueuedResult {
   return {
     id: "abc123",
     name: "kevin",
@@ -21,7 +21,7 @@ function makeResult(overrides?: Partial<QueuedResult>): QueuedResult {
 describe("ResultQueue", () => {
   it("add and get", () => {
     const q = new ResultQueue();
-    const r = makeResult();
+    const r = createResult();
     q.add(r);
     expect(q.get("abc123")).toBe(r);
   });
@@ -33,9 +33,9 @@ describe("ResultQueue", () => {
 
   it("getPending returns only pending results", () => {
     const q = new ResultQueue();
-    q.add(makeResult({ id: "a", status: "pending" }));
-    q.add(makeResult({ id: "b", status: "accepted" }));
-    q.add(makeResult({ id: "c", status: "pending" }));
+    q.add(createResult({ id: "a", status: "pending" }));
+    q.add(createResult({ id: "b", status: "accepted" }));
+    q.add(createResult({ id: "c", status: "pending" }));
     const pending = q.getPending();
     expect(pending).toHaveLength(2);
     expect(pending.map((r) => r.id)).toEqual(["a", "c"]);
@@ -43,14 +43,14 @@ describe("ResultQueue", () => {
 
   it("accept transitions pending to accepted", () => {
     const q = new ResultQueue();
-    q.add(makeResult({ id: "a" }));
+    q.add(createResult({ id: "a" }));
     q.accept("a");
     expect(q.get("a")!.status).toBe("accepted");
   });
 
   it("accept is no-op for non-pending", () => {
     const q = new ResultQueue();
-    q.add(makeResult({ id: "a", status: "accepted" }));
+    q.add(createResult({ id: "a", status: "accepted" }));
     q.accept("a");
     expect(q.get("a")!.status).toBe("accepted");
   });
@@ -64,7 +64,7 @@ describe("ResultQueue", () => {
     const q = new ResultQueue();
     const listener = vi.fn();
     q.onChange(listener);
-    q.add(makeResult({ id: "a" }));
+    q.add(createResult({ id: "a" }));
     expect(listener).toHaveBeenCalledTimes(1);
     q.accept("a");
     expect(listener).toHaveBeenCalledTimes(2);
@@ -74,10 +74,10 @@ describe("ResultQueue", () => {
     const q = new ResultQueue();
     const listener = vi.fn();
     const unsub = q.onChange(listener);
-    q.add(makeResult({ id: "a" }));
+    q.add(createResult({ id: "a" }));
     expect(listener).toHaveBeenCalledTimes(1);
     unsub();
-    q.add(makeResult({ id: "b" }));
+    q.add(createResult({ id: "b" }));
     expect(listener).toHaveBeenCalledTimes(1);
   });
 });

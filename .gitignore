@@ -1,7 +1,8 @@
 node_modules/
 dist/
 *.tgz
-.pi/
+.pi/*
+!.pi/prompts
 
 # DO NOT MODIFY THIS
 # The entire tmp/ directory must be ignored

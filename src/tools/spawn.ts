@@ -79,7 +79,7 @@ function resolveConfig(
 // Background activity callbacks (shared by spawn_bg and detach completion)
 // ---------------------------------------------------------------------------
 
-function makeBgCallbacks(tree: AgentTree, id: string) {
+function createBgCallbacks(tree: AgentTree, id: string) {
   return {
     onToolActivity: (activity: { type: "start" | "end"; toolName: string }) => {
       if (activity.type === "start") tree.updateActivity(id, `→ ${activity.toolName}`);
@@ -142,7 +142,7 @@ function handleBgCompletion(
 // spawn tool — foreground (blocks parent, streams progress)
 // ---------------------------------------------------------------------------
 
-export function makeSpawnExecute(
+export function spawn(
   tree: AgentTree,
   handles: Map<string, AbortController>,
   detachHandles: Map<string, DetachHandle>,
@@ -315,7 +315,7 @@ export function makeSpawnExecute(
 // spawn_bg tool — background (fire-and-forget, returns immediately)
 // ---------------------------------------------------------------------------
 
-export function makeSpawnBgExecute(
+export function spawnBg(
   tree: AgentTree,
   handles: Map<string, AbortController>,
   queue: ResultQueue,
@@ -347,7 +347,7 @@ export function makeSpawnBgExecute(
       parentModel: ctx.model,
       cwd: ctx.cwd,
       sessions,
-      ...makeBgCallbacks(tree, id),
+      ...createBgCallbacks(tree, id),
     });
 
     handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, handles, queue, pi);

@@ -40,7 +40,7 @@ export function parseSpawnArgs(args: string): { task: string; model?: string; ba
   return { task, model, background };
 }
 
-export function makeSpawnHandler(pi: ExtensionAPI) {
+export function createSpawnHandler(pi: ExtensionAPI) {
   return async function handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
     const parsed = parseSpawnArgs(args);
     if ("error" in parsed) {

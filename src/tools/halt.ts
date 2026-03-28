@@ -30,7 +30,7 @@ export async function abortAgents(
   return count;
 }
 
-export function makeHaltExecute(
+export function halt(
   tree: AgentTree,
   handles: Map<string, AbortController>,
 ) {

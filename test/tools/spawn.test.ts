@@ -12,7 +12,7 @@ vi.mock("../../src/spawn.js", () => ({
 
 import { discoverAgents } from "../../src/agents.js";
 import { runMinionSession } from "../../src/spawn.js";
-import { makeSpawnExecute, makeSpawnBgExecute } from "../../src/tools/spawn.js";
+import { spawn, spawnBg } from "../../src/tools/spawn.js";
 import type { DetachHandle } from "../../src/tools/spawn.js";
 import { emptyUsage } from "../../src/types.js";
 
@@ -24,11 +24,11 @@ const mockAgent = {
   filePath: "/tmp/scout.md",
 };
 
-function makeCtx(cwd = "/tmp") {
+function createCtx(cwd = "/tmp") {
   return { cwd, modelRegistry: {}, model: undefined, ui: { setWorkingMessage: vi.fn() } } as any;
 }
 
-function makeDeps() {
+function createDeps() {
   const tree = new AgentTree();
   const handles = new Map<string, AbortController>();
   const detachHandles = new Map<string, DetachHandle>();
@@ -51,21 +51,21 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("makeSpawnExecute", () => {
+describe("spawn", () => {
   it("throws for unknown agent and message lists available agents", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     await expect(
-      execute("tc-1", { agent: "unknown-agent", task: "do thing" }, undefined, undefined, makeCtx()),
+      execute("tc-1", { agent: "unknown-agent", task: "do thing" }, undefined, undefined, createCtx()),
     ).rejects.toThrow(/scout/);
   });
 
   it("adds node to tree with status running, then completed on success", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
-    await execute("tc-1", { agent: "scout", task: "find auth" }, undefined, undefined, makeCtx());
+    await execute("tc-1", { agent: "scout", task: "find auth" }, undefined, undefined, createCtx());
 
     const roots = tree.getRoots();
     expect(roots).toHaveLength(1);
@@ -75,19 +75,19 @@ describe("makeSpawnExecute", () => {
 
   it("sets node to failed and throws when session returns non-zero exit", async () => {
     vi.mocked(runMinionSession).mockResolvedValue({ exitCode: 1, finalOutput: "", usage: emptyUsage(), error: "exit 1" });
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     await expect(
-      execute("tc-1", { agent: "scout", task: "fail" }, undefined, undefined, makeCtx()),
+      execute("tc-1", { agent: "scout", task: "fail" }, undefined, undefined, createCtx()),
     ).rejects.toThrow();
 
     expect(tree.getRoots()[0]!.status).toBe("failed");
   });
 
   it("passes modelRegistry and parentModel to runMinionSession", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
     const ctx = { cwd: "/tmp", modelRegistry: { find: vi.fn() }, model: { provider: "anthropic", id: "claude-haiku-4-5" }, ui: { setWorkingMessage: vi.fn() } } as any;
 
     await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, ctx);
@@ -104,20 +104,20 @@ describe("makeSpawnExecute", () => {
   });
 
   it("returns final output as content text", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
-    const result = await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, makeCtx());
+    const result = await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx());
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toBe("done");
   });
 
   it("spawns ephemeral agent when no agent param", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     const result = await execute(
-      "tc-1", { task: "do the thing" }, undefined, undefined, makeCtx(),
+      "tc-1", { task: "do the thing" }, undefined, undefined, createCtx(),
     );
 
     expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
@@ -130,11 +130,11 @@ describe("makeSpawnExecute", () => {
   });
 
   it("ephemeral agent applies model override", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     await execute(
-      "tc-1", { task: "t", model: "claude-haiku-4-5" }, undefined, undefined, makeCtx(),
+      "tc-1", { task: "t", model: "claude-haiku-4-5" }, undefined, undefined, createCtx(),
     );
 
     expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
@@ -145,11 +145,11 @@ describe("makeSpawnExecute", () => {
   });
 
   it("still discovers named agent when agent param provided", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     await execute(
-      "tc-1", { agent: "scout", task: "find auth" }, undefined, undefined, makeCtx(),
+      "tc-1", { agent: "scout", task: "find auth" }, undefined, undefined, createCtx(),
     );
 
     expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
@@ -160,21 +160,21 @@ describe("makeSpawnExecute", () => {
   });
 
   it("cleans up handle after execution", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
-    await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, makeCtx());
+    await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx());
 
     expect(handles.size).toBe(0);
   });
 
   it("cleans up handle even on failure", async () => {
     vi.mocked(runMinionSession).mockResolvedValue({ exitCode: 1, finalOutput: "", usage: emptyUsage(), error: "fail" });
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     await expect(
-      execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, makeCtx()),
+      execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx()),
     ).rejects.toThrow();
 
     expect(handles.size).toBe(0);
@@ -184,11 +184,11 @@ describe("makeSpawnExecute", () => {
     let sessionResolve: (v: any) => void;
     vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
 
-    const { tree, handles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnBgExecute(tree, handles, queue, pi, sessions);
+    const { tree, handles, queue, pi, sessions } = createDeps();
+    const execute = spawnBg(tree, handles, queue, pi, sessions);
 
     const result = await execute(
-      "tc-1", { task: "bg task" }, undefined, undefined, makeCtx(),
+      "tc-1", { task: "bg task" }, undefined, undefined, createCtx(),
     );
 
     const text = (result.content[0] as { type: "text"; text: string }).text;
@@ -203,7 +203,7 @@ describe("makeSpawnExecute", () => {
   });
 
   it("foreground sets detachHandle before tree.add", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
 
     // Track when detachHandles is populated relative to tree.onChange
     let hadDetachOnAdd = false;
@@ -214,8 +214,8 @@ describe("makeSpawnExecute", () => {
       }
     });
 
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
-    await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, makeCtx());
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
+    await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx());
 
     // detachHandle was present when tree.onChange fired during add
     expect(hadDetachOnAdd).toBe(true);
@@ -226,11 +226,11 @@ describe("makeSpawnExecute", () => {
     let sessionResolve: (v: any) => void;
     vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
 
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     // Start foreground spawn — will block on the session promise
-    const executePromise = execute("tc-1", { task: "long task" }, undefined, undefined, makeCtx());
+    const executePromise = execute("tc-1", { task: "long task" }, undefined, undefined, createCtx());
 
     // The detach handle should be registered
     expect(detachHandles.size).toBe(1);
@@ -261,10 +261,10 @@ describe("makeSpawnExecute", () => {
     let sessionResolve: (v: any) => void;
     vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
 
-    const { tree, handles, detachHandles, queue, pi, sessions } = makeDeps();
-    const execute = makeSpawnExecute(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
+    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
-    const executePromise = execute("tc-1", { task: "detach task" }, undefined, undefined, makeCtx());
+    const executePromise = execute("tc-1", { task: "detach task" }, undefined, undefined, createCtx());
 
     // Detach
     const handle = [...detachHandles.values()][0]!;

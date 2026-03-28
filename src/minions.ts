@@ -2,8 +2,88 @@ import type { AgentTree } from "./tree.js";
 import type { AgentConfig } from "./types.js";
 
 export const MINION_NAMES = [
-  "kevin", "bob", "stuart", "dave", "jerry",
-  "phil", "tim", "mark", "lance", "mel",
+  // core
+  "kevin",
+  "stuart",
+  "bob",
+  "otto",
+  "mel",
+
+  "adrian",
+  "alan",
+  "arnie",
+  "barry",
+  "bill",
+  "billy",
+  "bobby",
+  "brad",
+  "brett",
+  "brian",
+  "bruno",
+  "cameron",
+  "carl",
+  "chris",
+  "claude",
+  "dan",
+  "dave",
+  "devin",
+  "donny",
+  "donald",
+  "eric",
+  "erik",
+  "frank",
+  "fred",
+  "gaetano",
+  "gary",
+  "george",
+  "gerald",
+  "henry",
+  "jack",
+  "jacob",
+  "jeff",
+  "jerry",
+  "jim",
+  "joe",
+  "john",
+  "jon",
+  "jorge",
+  "josh",
+  "juan",
+  "ken",
+  "kyle",
+  "lance",
+  "larry",
+  "leonard",
+  "liam",
+  "lionel",
+  "mack",
+  "mark",
+  "mason",
+  "mike",
+  "nathan",
+  "neil",
+  "norbert",
+  "oscar",
+  "paul",
+  "pedro",
+  "peter",
+  "ralph",
+  "raymond",
+  "robert",
+  "ron",
+  "ryan",
+  "samson",
+  "scott",
+  "spencer",
+  "steve",
+  "ted",
+  "tim",
+  "tom",
+  "tony",
+  "trevor",
+  "vincent",
+  "zack",
+  "ziggy",
 ] as const;
 
 export function generateId(): string {
@@ -23,6 +103,13 @@ Operating principles:
 - Be concise and direct. Your output is consumed by the parent agent, not displayed directly to a human. Avoid preamble, conclusions, and unnecessary elaboration.
 - Use available tools to investigate and complete the task. Prefer grep/find/ls to locate relevant files before reading them.
 - Use absolute file paths in your response.
+- ALWAYS be concise and brief when writing research analysis to files. DO NOT write long reports. Follow KISS
+- ALWAYS generate a single analysis file for the full task, NEVER generate multiple research files for the same task
+
+File creation boundaries:
+- For RESEARCH tasks: Write findings to /tmp/ only. Do NOT create project files (docs/, src/, configs). Deliver findings in the Result section.
+- For IMPLEMENTATION tasks: Create/modify project files only when explicitly requested (e.g., "implement X", "create Y", "add Z").
+- When in doubt: Report findings first, ask parent before creating files.
 
 Fail-fast rules:
 - If a tool call fails or returns unexpected output, STOP. Report what happened and what you observed.
