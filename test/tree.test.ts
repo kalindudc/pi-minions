@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { AgentTree } from "../src/tree.js";
 
 let tree: AgentTree;
@@ -140,5 +140,58 @@ describe("remove", () => {
     tree.add("a", "bob", "t");
     expect(() => tree.remove("nope")).not.toThrow();
     expect(tree.get("a")).toBeDefined();
+  });
+});
+
+describe("updateActivity", () => {
+  it("sets lastActivity on node", () => {
+    const tree = new AgentTree();
+    tree.add("a", "kevin", "do stuff");
+    tree.updateActivity("a", "→ $ ls -la");
+    expect(tree.get("a")!.lastActivity).toBe("→ $ ls -la");
+  });
+
+  it("is no-op for unknown id", () => {
+    const tree = new AgentTree();
+    expect(() => tree.updateActivity("nope", "test")).not.toThrow();
+  });
+});
+
+describe("onChange", () => {
+  it("fires on add", () => {
+    const tree = new AgentTree();
+    const listener = vi.fn();
+    tree.onChange(listener);
+    tree.add("a", "kevin", "do stuff");
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires on updateStatus", () => {
+    const tree = new AgentTree();
+    tree.add("a", "kevin", "do stuff");
+    const listener = vi.fn();
+    tree.onChange(listener);
+    tree.updateStatus("a", "completed", 0);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires on remove", () => {
+    const tree = new AgentTree();
+    tree.add("a", "kevin", "do stuff");
+    const listener = vi.fn();
+    tree.onChange(listener);
+    tree.remove("a");
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("unsubscribe stops notifications", () => {
+    const tree = new AgentTree();
+    const listener = vi.fn();
+    const unsub = tree.onChange(listener);
+    tree.add("a", "kevin", "do stuff");
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsub();
+    tree.add("b", "bob", "more");
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });

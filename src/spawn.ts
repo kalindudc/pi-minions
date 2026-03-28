@@ -50,6 +50,11 @@ export interface MinionCallbacks {
 // In-process agent session runner
 // ---------------------------------------------------------------------------
 
+/** Minimal interface for external steer access to a running session. */
+export interface MinionSession {
+  steer(text: string): Promise<void>;
+}
+
 export async function runMinionSession(
   config: AgentConfig,
   task: string,
@@ -60,6 +65,7 @@ export async function runMinionSession(
     modelRegistry: ModelRegistry;
     parentModel?: Model<any>;
     cwd: string;
+    sessions?: Map<string, MinionSession>;
   } & MinionCallbacks,
 ): Promise<SpawnResult> {
   const loader = new DefaultResourceLoader({
@@ -81,6 +87,12 @@ export async function runMinionSession(
     modelRegistry: opts.modelRegistry,
     resourceLoader: loader,
   });
+
+  // Expose session for steer access
+  const sessionId = opts.id ?? config.name;
+  if (opts.sessions) {
+    opts.sessions.set(sessionId, { steer: (text) => session.steer(text) });
+  }
 
   // Wire abort signal to session
   let abortCleanup: (() => void) | undefined;
@@ -188,6 +200,7 @@ export async function runMinionSession(
     logger.debug("spawn:session", "error", { name: config.name, error: msg });
     return { exitCode: 1, finalOutput: currentText, usage, error: msg };
   } finally {
+    if (opts.sessions) opts.sessions.delete(sessionId);
     unsubscribe();
     abortCleanup?.();
     session.dispose();

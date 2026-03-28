@@ -1,25 +1,39 @@
 import { Type } from "@sinclair/typebox";
 import type { Static } from "@sinclair/typebox";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { discoverAgents } from "../agents.js";
 import { runMinionSession } from "../spawn.js";
+import type { MinionSession } from "../spawn.js";
 import { formatToolCall } from "../render.js";
 import { AgentTree } from "../tree.js";
 import { generateId, pickMinionName, defaultMinionTemplate } from "../minions.js";
 import { logger } from "../logger.js";
+import type { ResultQueue } from "../queue.js";
 import type { AgentConfig, UsageStats } from "../types.js";
 import { emptyUsage } from "../types.js";
 
-export const SpawnToolParams = Type.Object({
+// ---------------------------------------------------------------------------
+// Shared parameter schemas
+// ---------------------------------------------------------------------------
+
+const baseParams = {
   agent: Type.Optional(Type.String({
     description: "Name of the agent to invoke. If omitted, spawns an ephemeral minion with default capabilities.",
   })),
   task: Type.String({ description: "Task to delegate to the agent" }),
   model: Type.Optional(Type.String({ description: "Override the agent's model" })),
-});
+};
 
+export const SpawnToolParams = Type.Object(baseParams);
 export type SpawnToolParams = Static<typeof SpawnToolParams>;
+
+export const SpawnBgToolParams = Type.Object(baseParams);
+export type SpawnBgToolParams = Static<typeof SpawnBgToolParams>;
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
 
 export interface SpawnToolDetails {
   id: string;
@@ -34,9 +48,107 @@ export interface SpawnToolDetails {
   spinnerFrame?: number;
 }
 
+/** Stored in detachHandles so /minions bg can detach a foreground spawn. */
+export interface DetachHandle {
+  resolve: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Shared config resolution
+// ---------------------------------------------------------------------------
+
+function resolveConfig(
+  params: { agent?: string; task: string; model?: string },
+  name: string,
+  cwd: string,
+): AgentConfig {
+  if (params.agent) {
+    const { agents } = discoverAgents(cwd, "both");
+    const found = agents.find((a) => a.name === params.agent);
+    if (!found) {
+      const available = agents.map((a) => a.name).join(", ") || "none";
+      logger.debug("spawn:tool", "agent not found", { requested: params.agent, available });
+      throw new Error(`Agent "${params.agent}" not found. Available: ${available}`);
+    }
+    return found;
+  }
+  return defaultMinionTemplate(name, { model: params.model });
+}
+
+// ---------------------------------------------------------------------------
+// Background activity callbacks (shared by spawn_bg and detach completion)
+// ---------------------------------------------------------------------------
+
+function makeBgCallbacks(tree: AgentTree, id: string) {
+  return {
+    onToolActivity: (activity: { type: "start" | "end"; toolName: string }) => {
+      if (activity.type === "start") tree.updateActivity(id, `→ ${activity.toolName}`);
+    },
+    onToolOutput: (toolName: string, delta: string) => {
+      const line = delta.trimEnd().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
+      if (line) tree.updateActivity(id, `${toolName}: ${line}`);
+    },
+    onTextDelta: (_delta: string, fullText: string) => {
+      const preview = fullText.split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
+      tree.updateActivity(id, preview);
+    },
+    onTurnEnd: (turnCount: number) => { tree.updateActivity(id, `turn ${turnCount}`); },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Background completion handler (shared by spawn_bg and detach)
+// ---------------------------------------------------------------------------
+
+function handleBgCompletion(
+  sessionPromise: Promise<import("../types.js").SpawnResult>,
+  id: string, name: string, task: string, startTime: number,
+  tree: AgentTree, handles: Map<string, AbortController>,
+  queue: ResultQueue, pi: ExtensionAPI,
+): void {
+  void sessionPromise.then((result) => {
+    const status = result.exitCode === 0 ? "completed" : "failed";
+    tree.updateStatus(id, status, result.exitCode, result.error);
+    tree.updateUsage(id, result.usage);
+    handles.delete(id);
+
+    queue.add({
+      id, name, task,
+      output: result.finalOutput, usage: result.usage,
+      status: "pending", completedAt: Date.now(),
+      duration: Date.now() - startTime,
+      exitCode: result.exitCode, error: result.error,
+    });
+
+    const messageContent = [
+      `Background minion "${name}" (${id}) completed.`,
+      `Task: ${task}`,
+      `Exit code: ${result.exitCode}`,
+      ...(result.error ? [`Error: ${result.error}`] : []),
+      ``, result.finalOutput,
+    ].join("\n");
+    pi.sendUserMessage(messageContent, { deliverAs: "followUp" });
+    queue.accept(id);
+    logger.debug("spawn:tool", "bg-completed", { id, name, exitCode: result.exitCode });
+  }).catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    tree.updateStatus(id, "failed", 1, msg);
+    handles.delete(id);
+    logger.debug("spawn:tool", "bg-failed", { id, name, error: msg });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// spawn tool — foreground (blocks parent, streams progress)
+// ---------------------------------------------------------------------------
+
 export function makeSpawnExecute(
   tree: AgentTree,
   handles: Map<string, AbortController>,
+  detachHandles: Map<string, DetachHandle>,
+  queue: ResultQueue,
+  pi: ExtensionAPI,
+  sessions: Map<string, MinionSession>,
 ) {
   return async function execute(
     _toolCallId: string,
@@ -47,40 +159,34 @@ export function makeSpawnExecute(
   ): Promise<AgentToolResult<SpawnToolDetails>> {
     const id = generateId();
     const name = pickMinionName(tree, id);
-
-    let config: AgentConfig;
-    if (params.agent) {
-      const { agents } = discoverAgents(ctx.cwd, "both");
-      const found = agents.find((a) => a.name === params.agent);
-      if (!found) {
-        const available = agents.map((a) => a.name).join(", ") || "none";
-        logger.debug("spawn:tool", "agent not found", { requested: params.agent, available });
-        throw new Error(`Agent "${params.agent}" not found. Available: ${available}`);
-      }
-      config = found;
-    } else {
-      config = defaultMinionTemplate(name, {
-        model: params.model,
-      });
-    }
+    const config = resolveConfig(params, name, ctx.cwd);
 
     logger.debug("spawn:tool", "start", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
 
-    tree.add(id, name, params.task);
     const controller = new AbortController();
     handles.set(id, controller);
 
+    // Set up detach handle BEFORE tree.add so tree.onChange
+    // correctly filters this minion as foreground (not counted in bg status).
+    let detachResolve: (() => void) | undefined;
+    const detachPromise = new Promise<void>((resolve) => {
+      detachResolve = resolve;
+    });
+    detachHandles.set(id, { resolve: detachResolve! });
+    tree.add(id, name, params.task);
+
     // Forward parent signal to our controller
+    let signalCleanup: (() => void) | undefined;
     if (signal) {
       const onAbort = () => controller.abort();
       if (signal.aborted) {
         controller.abort();
       } else {
         signal.addEventListener("abort", onAbort, { once: true });
+        signalCleanup = () => signal.removeEventListener("abort", onAbort);
       }
     }
 
-    // Track last known streaming state so spinner ticks don't clobber it
     let lastActivity: string | undefined;
     let lastOutput = "";
     let spinnerFrame = 0;
@@ -103,51 +209,69 @@ export function makeSpawnExecute(
       });
     };
 
-    // Animate spinner at ~80ms for smooth braille rotation
-    const spinnerInterval = setInterval(() => {
-      spinnerFrame++;
-      emitUpdate();
-    }, 80);
+    const spinnerInterval = setInterval(() => { spinnerFrame++; emitUpdate(); }, 80);
+    let detached = false;
 
     try {
-      ctx.ui.setWorkingMessage(`minion ${name} working…`);
-
-      const result = await runMinionSession(config, params.task, {
-        id,
-        name,
+      const sessionPromise = runMinionSession(config, params.task, {
+        id, name,
         signal: controller.signal,
         modelRegistry: ctx.modelRegistry,
         parentModel: ctx.model,
         cwd: ctx.cwd,
+        sessions,
         onToolActivity: (activity) => {
           if (activity.type === "start") {
             const desc = formatToolCall(activity.toolName, {});
-            ctx.ui.setWorkingMessage(`${name}: ${desc}`);
             emitUpdate({ activity: `→ ${desc}` });
-          }
-          if (activity.type === "end") {
-            ctx.ui.setWorkingMessage(`${name} working…`);
+            tree.updateActivity(id, `→ ${desc}`);
           }
         },
         onToolOutput: (toolName, delta) => {
           const line = delta.trimEnd().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
           if (line) {
             emitUpdate({ activity: `${toolName}: ${line}` });
+            tree.updateActivity(id, `${toolName}: ${line}`);
           }
         },
         onTextDelta: (_delta, fullText) => {
           const preview = fullText.split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
           emitUpdate({ activity: preview, finalOutput: preview });
+          tree.updateActivity(id, preview);
         },
         onTurnEnd: (turnCount) => {
-          ctx.ui.setWorkingMessage(`${name}: turn ${turnCount}`);
-          // Don't emit "turn X" as activity — it overwrites the last
-          // meaningful status (tool call or text preview). The turn count
-          // shows in the working message instead.
+          tree.updateActivity(id, `turn ${turnCount}`);
         },
       });
 
-      // Don't overwrite "aborted" status — halt already set it
+      // Race: session completes normally OR /minions bg detaches it
+      const raceResult = await Promise.race([
+        sessionPromise.then((r) => ({ type: "completed" as const, result: r })),
+        detachPromise.then(() => ({ type: "detached" as const })),
+      ]);
+
+      if (raceResult.type === "detached") {
+        detached = true;
+        signalCleanup?.();
+        signalCleanup = undefined;
+
+        const startTime = tree.get(id)?.startTime ?? Date.now();
+        handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, handles, queue, pi);
+
+        logger.debug("spawn:tool", "detached", { id, name });
+        return {
+          content: [{ type: "text", text: `[USER ACTION] The user moved minion ${name} (${id}) to background via /minions bg. The minion is still running and will deliver its result when complete. Continue with other tasks.` }],
+          details: {
+            id, name, agentName: params.agent ?? config.name, task: params.task,
+            status: "running", usage: tree.get(id)?.usage ?? emptyUsage(),
+            model: params.model ?? config.model,
+            finalOutput: `Moved to background by user`,
+          },
+        };
+      }
+
+      // Normal completion path
+      const result = raceResult.result;
       const currentNode = tree.get(id);
       const status = currentNode?.status === "aborted"
         ? "aborted"
@@ -168,9 +292,8 @@ export function makeSpawnExecute(
       };
 
       if (status === "aborted") {
-        throw new Error(`[HALTED] Minion ${name} was stopped by the user. This is intentional — do NOT retry or re-spawn.`);
+        throw new Error(`[HALTED] Minion ${name} (${id}) was stopped by the user. This is intentional — do NOT retry or re-spawn.`);
       }
-
       if (result.exitCode !== 0) {
         throw new Error(result.error ?? `Agent exited with code ${result.exitCode}`);
       }
@@ -181,8 +304,62 @@ export function makeSpawnExecute(
       };
     } finally {
       clearInterval(spinnerInterval);
-      ctx.ui.setWorkingMessage();
-      handles.delete(id);
+      detachHandles.delete(id);
+      signalCleanup?.();
+      if (!detached) handles.delete(id);
     }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// spawn_bg tool — background (fire-and-forget, returns immediately)
+// ---------------------------------------------------------------------------
+
+export function makeSpawnBgExecute(
+  tree: AgentTree,
+  handles: Map<string, AbortController>,
+  queue: ResultQueue,
+  pi: ExtensionAPI,
+  sessions: Map<string, MinionSession>,
+) {
+  return async function execute(
+    _toolCallId: string,
+    params: SpawnBgToolParams,
+    _signal: AbortSignal | undefined,
+    _onUpdate: unknown,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<SpawnToolDetails>> {
+    const id = generateId();
+    const name = pickMinionName(tree, id);
+    const config = resolveConfig(params, name, ctx.cwd);
+
+    logger.debug("spawn:tool", "start-bg", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
+
+    const controller = new AbortController();
+    handles.set(id, controller);
+    tree.add(id, name, params.task);
+
+    const startTime = Date.now();
+    const sessionPromise = runMinionSession(config, params.task, {
+      id, name,
+      signal: controller.signal,
+      modelRegistry: ctx.modelRegistry,
+      parentModel: ctx.model,
+      cwd: ctx.cwd,
+      sessions,
+      ...makeBgCallbacks(tree, id),
+    });
+
+    handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, handles, queue, pi);
+
+    return {
+      content: [{ type: "text", text: `Spawned ${name} (${id}) in background. Results will be delivered when complete.` }],
+      details: {
+        id, name, agentName: params.agent ?? config.name, task: params.task,
+        status: "running", usage: emptyUsage(),
+        model: params.model ?? config.model,
+        finalOutput: `Spawned in background`,
+      },
+    };
   };
 }

@@ -81,22 +81,34 @@ export function renderResult(
   result: AgentToolResult<SpawnToolDetails>,
   { expanded, isPartial }: ToolRenderResultOptions,
   theme: Theme,
-  ctx: { isError: boolean },
+  ctx: { isError: boolean; state?: { cachedName?: string; cachedId?: string } },
 ): Text {
   const details = result.details;
   const isError = ctx.isError;
 
   // Streaming: show activity while the minion is running
   if (isPartial && details) {
+    // Cache name/id in render state so they survive tool errors
+    if (ctx.state) {
+      ctx.state.cachedName = details.name;
+      ctx.state.cachedId = details.id;
+    }
+
     const frame = SPINNER[(details.spinnerFrame ?? 0) % SPINNER.length];
     const activity = details.activity ?? "thinking…";
+    const hint = theme.fg("dim", `  ·  /minions bg ${details.name ?? ""}`);
     const line =
       theme.fg("accent", frame) + " " +
       theme.fg("accent", details.name ?? "minion") +
       (details.id ? theme.fg("dim", ` (${details.id})`) : "") +
+      hint +
       "\n" + theme.fg("dim", `  ⎿  ${activity}`);
     return new Text(line, 0, 0);
   }
+
+  // Resolve name/id: prefer details, fall back to cached state
+  const name = details?.name ?? ctx.state?.cachedName ?? "minion";
+  const id = details?.id ?? ctx.state?.cachedId;
 
   // Completed / failed / aborted
   const isAborted = details?.status === "aborted";
@@ -108,8 +120,8 @@ export function renderResult(
 
   const header =
     `${icon} ` +
-    theme.fg(nameColor, details?.name ?? "minion") +
-    (details?.id ? theme.fg("dim", ` (${details.id})`) : "") +
+    theme.fg(nameColor, name) +
+    (id ? theme.fg("dim", ` (${id})`) : "") +
     (details?.usage ? " " + theme.fg("muted", formatUsage(details.usage, details.model)) : "");
 
   if (!expanded || !details?.finalOutput) {

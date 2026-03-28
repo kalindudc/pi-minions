@@ -3,6 +3,16 @@ import { emptyUsage } from "./types.js";
 
 export class AgentTree {
   private nodes = new Map<string, AgentNode>();
+  private listeners = new Set<() => void>();
+
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
 
   add(id: string, name: string, task: string, parentId?: string): AgentNode {
     const node: AgentNode = {
@@ -22,6 +32,7 @@ export class AgentTree {
       if (parent) parent.children.push(id);
     }
 
+    this.notify();
     return node;
   }
 
@@ -72,12 +83,18 @@ export class AgentTree {
     if (exitCode !== undefined) node.exitCode = exitCode;
     if (error !== undefined) node.error = error;
     if (status !== "running" && status !== "pending") node.endTime = Date.now();
+    this.notify();
   }
 
   updateUsage(id: string, partial: Partial<UsageStats>): void {
     const node = this.nodes.get(id);
     if (!node) return;
     Object.assign(node.usage, partial);
+  }
+
+  updateActivity(id: string, activity: string): void {
+    const node = this.nodes.get(id);
+    if (node) node.lastActivity = activity;
   }
 
   remove(id: string): void {
@@ -98,5 +115,6 @@ export class AgentTree {
     }
 
     this.nodes.delete(id);
+    this.notify();
   }
 }

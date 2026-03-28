@@ -49,4 +49,19 @@ export interface AgentNode {
   endTime?: number;
   exitCode?: number;
   error?: string;
+  /** Live activity line, e.g. "→ $ grep -r TODO src/" */
+  lastActivity?: string;
+}
+
+export interface QueuedResult {
+  id: string;
+  name: string;
+  task: string;
+  output: string;
+  usage: UsageStats;
+  status: "pending" | "accepted";
+  completedAt: number;
+  duration: number;
+  exitCode: number;
+  error?: string;
 }

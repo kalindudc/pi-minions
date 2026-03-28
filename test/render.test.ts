@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { formatTokens, formatDuration, formatToolCall, formatUsage } from "../src/render.js";
+import { formatTokens, formatDuration, formatToolCall, formatUsage, renderResult } from "../src/render.js";
 import type { UsageStats } from "../src/types.js";
+import { emptyUsage } from "../src/types.js";
 
 describe("formatTokens", () => {
   it("formats small numbers as-is", () => {
@@ -91,5 +92,74 @@ describe("formatUsage", () => {
       cost: 0, contextTokens: 0, turns: 0,
     };
     expect(() => formatUsage(usage)).not.toThrow();
+  });
+});
+
+describe("renderResult", () => {
+  // Minimal theme stub that returns text as-is (no ANSI codes)
+  const theme = {
+    fg: (_color: string, text: string) => text,
+    bold: (text: string) => text,
+  } as any;
+
+  it("streaming render includes /minions bg hint", () => {
+    const details = {
+      id: "abc", name: "kevin", agentName: "kevin", task: "t",
+      status: "running", usage: emptyUsage(), finalOutput: "",
+      activity: "thinking…", spinnerFrame: 0,
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: true },
+      theme,
+      { isError: false },
+    );
+    const lines = result.render(100);
+    const text = lines.join("\n");
+    expect(text).toContain("kevin");
+    expect(text).toContain("/minions bg");
+  });
+
+  it("streaming render caches name/id to state", () => {
+    const details = {
+      id: "abc", name: "kevin", agentName: "kevin", task: "t",
+      status: "running", usage: emptyUsage(), finalOutput: "",
+      activity: "thinking…", spinnerFrame: 0,
+    };
+    const state: Record<string, string | undefined> = {};
+    renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: true },
+      theme,
+      { isError: false, state },
+    );
+    expect(state.cachedName).toBe("kevin");
+    expect(state.cachedId).toBe("abc");
+  });
+
+  it("error render falls back to cached state when details missing", () => {
+    const state = { cachedName: "kevin", cachedId: "abc123" };
+    const result = renderResult(
+      { content: [{ type: "text", text: "error" }], details: undefined as any },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: true, state },
+    );
+    const lines = result.render(100);
+    const text = lines.join("\n");
+    expect(text).toContain("kevin");
+    expect(text).toContain("abc123");
+  });
+
+  it("error render shows 'minion' when no details and no state", () => {
+    const result = renderResult(
+      { content: [{ type: "text", text: "error" }], details: undefined as any },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: true },
+    );
+    const lines = result.render(100);
+    const text = lines.join("\n");
+    expect(text).toContain("minion");
   });
 });

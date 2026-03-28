@@ -43,16 +43,6 @@ tasks:
     cmds:
       - npx vitest run
 
-  test:watch:
-    desc: "Run unit tests in watch mode"
-    cmds:
-      - npx vitest
-
-  test:integration:
-    desc: "Run integration tests (requires pi installed)"
-    cmds:
-      - npx vitest run --reporter=verbose test/**/*.integration.test.ts
-
   typecheck:
     desc: "Run TypeScript type checker"
     cmds:

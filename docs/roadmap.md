@@ -14,15 +14,20 @@ Plan: `tmp/plan/minion-flow/01-rewrite-spawn-command.md`
 - [x] Minion transcript logging to `tmp/logs/minions/<id>-<name>.log`
 - [x] No more: temp files, JSON stdout parsing, `PI_MINIONS_DEPTH` env var, `child_process`
 
-## Next: v0.3 — Background Mode and Queue Management
+## Completed: v0.3 — Background Mode and Queue Management
 
 Plan: `tmp/plan/minion-flow/02-background-queue-and-mgmt.md`
 
-- [ ] `--bg` flag on `/spawn` for background fire-and-forget
-- [ ] `QueuedResult` type and `ResultQueue` class
-- [ ] `/minions` command (`list`, `accept`, `eval`, `dismiss`, `show`)
-- [ ] Background status widget above editor
-- [ ] `minion-result` message renderer for `/minions accept`
+- [x] `--bg` flag on `/spawn` for background fire-and-forget
+- [x] `QueuedResult` type and `ResultQueue` class
+- [x] `/minions` command (`list`, `show`, `bg`, `steer`)
+- [x] Background status widget above editor
+- [x] `minion-result` message renderer for `/minions accept`
+- [x] Auto-delivery of background results to parent LLM via `pi.sendMessage({ deliverAs: "nextTurn" })`
+- [x] `/minions bg <id|name>` — live detach: send a running foreground minion to background without interrupting it
+- [x] `/minions steer <id|name> <message>` — send steering messages to running minions
+- [x] Streaming banner shows `/minions bg <name>` hint during foreground execution
+- [x] Render state caching preserves minion name/ID on error/abort banners
 
 ## Planned: v0.4 — Observability Dashboard
 
