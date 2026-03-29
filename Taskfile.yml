@@ -73,6 +73,11 @@ tasks:
   test:e2e:
     desc: "Run e2e safety control tests against real pi + LLM (usage: task test:e2e [-- filter])"
     cmds:
+      - |
+        echo "e2e test suites takes quite a while, it is recommended to filter and run specific tests"
+        echo " "
+        echo "    $ task test:e2e -- graceful"
+        echo " "
       - ./scripts/e2e.sh {{.CLI_ARGS}}
 
   logs:
