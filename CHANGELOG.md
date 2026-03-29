@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-29
+
+feat: safety controls with step count and timeout for minions
+feat: config inheritance from parent sessions
+feat: agentic e2e test suite
+test: comprehensive e2e test coverage
+docs: add roadmap for v1.0.0
+chore: remove unused update-docs prompt
+chore: streamline minion name pool
+
 ## [0.1.0] - 2026-03-28
 
 feat: in-process minion sessions with streaming and clean abort
