@@ -2,9 +2,9 @@
 
 [![version 0.3.0](https://img.shields.io/badge/version-0.3.0-blue)](CHANGELOG.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE.md)
-[![pi extension](https://img.shields.io/badge/pi-extension-purple)](https://github.com/mariozechner/pi-coding-agent)
+[![pi extension](https://img.shields.io/badge/pi-extension-purple)](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 
-Minimal recursive subagent orchestration for [pi](https://github.com/mariozechner/pi-coding-agent). No bundled agents, no opinions.
+Minimal recursive subagent orchestration for [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). No bundled agents, no opinions.
 
 ![pi-minions in action](./docs/assets/multi_minions.png)
 

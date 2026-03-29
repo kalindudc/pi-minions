@@ -55,12 +55,12 @@ Format:
 ```markdown
 ## [X.Y.Z] - YYYY-MM-DD
 
-feat: description
-feat: another feature
-fix: bug description
-docs: documentation update
-chore: maintenance task
-test: test changes
+- feat: description
+- feat: another feature
+- fix: bug description
+- docs: documentation update
+- chore: maintenance task
+- test: test changes
 ```
 
 Rules:
@@ -91,10 +91,10 @@ Version bump: X.Y.Z → A.B.C (TYPE - reason)
 CHANGELOG entry:
 ## [A.B.C] - YYYY-MM-DD
 
-feat: feature description
-fix: fix description
-docs: documentation update
-chore: maintenance task
+- feat: feature description
+- fix: fix description
+- docs: documentation update
+- chore: maintenance task
 
 Ready to create release vA.B.C? I will:
 1. Update package.json version
