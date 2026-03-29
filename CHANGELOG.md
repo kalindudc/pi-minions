@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-29
+
+- feat: custom footer showing combined minion + parent session token usage for complete session cost visibility
+- fix: minion completion status rendering when parallel foreground minions are active
+- fix: `task dev` plugin loading when stable version is already installed
+- fix: release script now generates `package-lock.json` before committing
+- chore: CHANGELOG.md formatting
+
 ## [0.3.0] - 2026-03-29
 
 - feat: extend agent discovery to support `~/.agents/` and `.agents/` paths
