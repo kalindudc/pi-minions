@@ -3,27 +3,42 @@
   "version": "0.4.0",
   "description": "Minimal recursive subagent orchestration for pi. No bundled agents, no opinions.",
   "type": "module",
-  "keywords": ["pi-package", "pi", "pi-extension", "subagent", "agent", "orchestration"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "subagent",
+    "agent",
+    "orchestration"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kalindudc/pi-minions.git"
   },
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
-  "files": ["src/", "docs/", "README.md", "CHANGELOG.md", "LICENSE.md"],
+  "files": [
+    "src/",
+    "docs/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE.md"
+  ],
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*",
     "@sinclair/typebox": "*"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.63.0",
+    "@mariozechner/pi-coding-agent": "^0.63.2",
     "@mariozechner/pi-tui": "^0.63.0",
     "@sinclair/typebox": "^0.34.0",
-    "vitest": "^3.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   },
   "scripts": {
     "test": "vitest run",
