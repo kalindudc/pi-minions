@@ -61,10 +61,17 @@ describe("loadAgentsFromDir", () => {
     expect(scout!.thinking).toBe("low");
   });
 
-  it("parses max_turns as number", () => {
+  it("parses steps as number", () => {
     const agents = loadAgentsFromDir(FIXTURES, "user");
     const thinker = agents.find((a) => a.name === "thinker");
-    expect(thinker!.maxTurns).toBe(30);
+    expect(thinker!.steps).toBe(30);
+  });
+
+  it("parses steps from opencode-compat agents", () => {
+    const agents = loadAgentsFromDir(FIXTURES, "user");
+    const researcher = agents.find((a) => a.name === "researcher");
+    expect(researcher).toBeDefined();
+    expect(researcher!.steps).toBe(30);
   });
 
   it("silently ignores unknown opencode frontmatter fields", () => {
@@ -72,7 +79,7 @@ describe("loadAgentsFromDir", () => {
     const researcher = agents.find((a) => a.name === "researcher");
     expect(researcher).toBeDefined();
     expect(researcher!.description).toBe("Research agent");
-    // Extra fields from opencode (mode, temperature, steps, color) must not throw
+    // Extra fields from opencode (mode, temperature, color) must not throw
     expect(researcher!.model).toBe("claude-sonnet-4-5");
   });
 

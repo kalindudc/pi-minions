@@ -169,6 +169,18 @@ Abort one, multiple, or all running minions.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PI_MINIONS_DEBUG` | Enable debug logging | `0` |
+| `PI_MINIONS_TIMEOUT` | Global timeout for all minions (ms). 30s grace period before force abort. | unlimited |
+
+### Safety Configuration
+
+Configure per-agent via frontmatter or globally via environment variables.
+
+| Setting | Frontmatter | Env Var | Behavior |
+|---------|-------------|---------|----------|
+| **Step limit** | `steps: 30` | — | Graceful steer at limit, force abort after 1 grace turn |
+| **Timeout** | `timeout: 60000` | `PI_MINIONS_TIMEOUT` | Graceful steer at expiry, force abort after 30s grace |
+
+Per-agent `timeout` overrides `PI_MINIONS_TIMEOUT`. Step limits are per-agent only.
 
 ### Agent Discovery
 
@@ -182,6 +194,8 @@ Named agents discovered from:
 name: researcher
 description: Research with citations
 model: claude-3-5-sonnet-20241022
+steps: 30
+timeout: 60000
 ---
 [System prompt content]
 ```
@@ -192,8 +206,8 @@ model: claude-3-5-sonnet-20241022
 
 | Log Type | Location | Contents | Enable |
 |----------|----------|----------|--------|
-| **Debug** | `tmp/logs/debug.log` | Extension lifecycle, spawn events, errors | `PI_MINIONS_DEBUG=1` |
-| **Transcripts** | `tmp/logs/minions/<id>-<name>.log` | Per-minion conversation (tool calls, output deltas, messages) | Always on |
+| **Debug** | `/tmp/logs/pi-minions/debug.log` | Extension lifecycle, spawn events, errors. `info`/`warn`/`error` always logged; `debug` respects `PI_MINIONS_DEBUG`. | `PI_MINIONS_DEBUG=1` (for debug level) |
+| **Transcripts** | `/tmp/logs/pi-minions/minions/<id>-<name>.log` | Per-minion conversation (tool calls, output deltas, messages) | Always on |
 
 ---
 

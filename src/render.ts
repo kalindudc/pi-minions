@@ -4,9 +4,7 @@ import { Text } from "@mariozechner/pi-tui";
 import type { UsageStats } from "./types.js";
 import type { SpawnToolDetails } from "./tools/spawn.js";
 
-// ---------------------------------------------------------------------------
-// Pure formatting helpers (no pi deps, fully testable)
-// ---------------------------------------------------------------------------
+// Formatting helpers
 
 export function formatTokens(n: number): string {
   if (n < 1000) return String(n);
@@ -41,18 +39,19 @@ export function formatToolCall(name: string, args: Record<string, unknown>): str
 
 export function formatUsage(usage: UsageStats, model?: string): string {
   const parts: string[] = [];
+
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns !== 1 ? "s" : ""}`);
   if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
   if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+
   if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
   if (usage.contextTokens) parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
   if (model) parts.push(model);
+
   return parts.join(" ");
 }
 
-// ---------------------------------------------------------------------------
-// TUI render functions for the spawn tool
-// ---------------------------------------------------------------------------
+// TUI render functions
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -106,7 +105,8 @@ export function renderResult(
     return new Text(line, 0, 0);
   }
 
-  // Resolve name/id: prefer details, fall back to cached state
+  // Prefer details, fall back to cached state from streaming phase (details is
+  // undefined when the tool errors, so the cache preserves identity for display)
   const name = details?.name ?? ctx.state?.cachedName ?? "minion";
   const id = details?.id ?? ctx.state?.cachedId;
 

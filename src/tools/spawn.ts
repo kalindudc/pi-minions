@@ -13,10 +13,7 @@ import type { ResultQueue } from "../queue.js";
 import type { AgentConfig, UsageStats } from "../types.js";
 import { emptyUsage } from "../types.js";
 
-// ---------------------------------------------------------------------------
-// Shared parameter schemas
-// ---------------------------------------------------------------------------
-
+// Parameter schemas
 const baseParams = {
   agent: Type.Optional(Type.String({
     description: "Name of the agent to invoke. If omitted, spawns an ephemeral minion with default capabilities.",
@@ -31,10 +28,7 @@ export type SpawnToolParams = Static<typeof SpawnToolParams>;
 export const SpawnBgToolParams = Type.Object(baseParams);
 export type SpawnBgToolParams = Static<typeof SpawnBgToolParams>;
 
-// ---------------------------------------------------------------------------
-// Shared types
-// ---------------------------------------------------------------------------
-
+// Types
 export interface SpawnToolDetails {
   id: string;
   name: string;
@@ -53,10 +47,7 @@ export interface DetachHandle {
   resolve: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Shared config resolution
-// ---------------------------------------------------------------------------
-
+// Config resolution
 function resolveConfig(
   params: { agent?: string; task: string; model?: string },
   name: string,
@@ -67,7 +58,7 @@ function resolveConfig(
     const found = agents.find((a) => a.name === params.agent);
     if (!found) {
       const available = agents.map((a) => a.name).join(", ") || "none";
-      logger.debug("spawn:tool", "agent not found", { requested: params.agent, available });
+      logger.warn("spawn:tool", "agent not found", { requested: params.agent, available });
       throw new Error(`Agent "${params.agent}" not found. Available: ${available}`);
     }
     return found;
@@ -75,16 +66,14 @@ function resolveConfig(
   return defaultMinionTemplate(name, { model: params.model });
 }
 
-// ---------------------------------------------------------------------------
-// Background activity callbacks (shared by spawn_bg and detach completion)
-// ---------------------------------------------------------------------------
-
+// Background activity callbacks (shared by spawn_bg and detach)
 function createBgCallbacks(tree: AgentTree, id: string) {
   return {
     onToolActivity: (activity: { type: "start" | "end"; toolName: string }) => {
       if (activity.type === "start") tree.updateActivity(id, `→ ${activity.toolName}`);
     },
     onToolOutput: (toolName: string, delta: string) => {
+      // Extract last non-empty line, truncate to 80 chars for activity preview
       const line = delta.trimEnd().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
       if (line) tree.updateActivity(id, `${toolName}: ${line}`);
     },
@@ -96,10 +85,7 @@ function createBgCallbacks(tree: AgentTree, id: string) {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Background completion handler (shared by spawn_bg and detach)
-// ---------------------------------------------------------------------------
-
 function handleBgCompletion(
   sessionPromise: Promise<import("../types.js").SpawnResult>,
   id: string, name: string, task: string, startTime: number,
@@ -127,21 +113,19 @@ function handleBgCompletion(
       ...(result.error ? [`Error: ${result.error}`] : []),
       ``, result.finalOutput,
     ].join("\n");
+
     pi.sendUserMessage(messageContent, { deliverAs: "followUp" });
     queue.accept(id);
-    logger.debug("spawn:tool", "bg-completed", { id, name, exitCode: result.exitCode });
+    logger.info("spawn:tool", "bg-completed", { id, name, exitCode: result.exitCode });
   }).catch((err) => {
     const msg = err instanceof Error ? err.message : String(err);
     tree.updateStatus(id, "failed", 1, msg);
     handles.delete(id);
-    logger.debug("spawn:tool", "bg-failed", { id, name, error: msg });
+    logger.error("spawn:tool", "bg-failed", { id, name, error: msg });
   });
 }
 
-// ---------------------------------------------------------------------------
-// spawn tool — foreground (blocks parent, streams progress)
-// ---------------------------------------------------------------------------
-
+// Foreground spawn (blocks parent, streams progress)
 export function spawn(
   tree: AgentTree,
   handles: Map<string, AbortController>,
@@ -160,22 +144,21 @@ export function spawn(
     const id = generateId();
     const name = pickMinionName(tree, id);
     const config = resolveConfig(params, name, ctx.cwd);
-
-    logger.debug("spawn:tool", "start", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
+    logger.info("spawn:tool", "start", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
 
     const controller = new AbortController();
     handles.set(id, controller);
 
-    // Set up detach handle BEFORE tree.add so tree.onChange
-    // correctly filters this minion as foreground (not counted in bg status).
+    // Detach handle: resolves when /minions bg is called, racing against session completion.
+    // Must be set up BEFORE tree.add so tree.onChange correctly filters this as foreground.
     let detachResolve: (() => void) | undefined;
     const detachPromise = new Promise<void>((resolve) => {
       detachResolve = resolve;
     });
     detachHandles.set(id, { resolve: detachResolve! });
+
     tree.add(id, name, params.task);
 
-    // Forward parent signal to our controller
     let signalCleanup: (() => void) | undefined;
     if (signal) {
       const onAbort = () => controller.abort();
@@ -194,6 +177,7 @@ export function spawn(
     const emitUpdate = (partial?: Partial<SpawnToolDetails>) => {
       if (partial?.activity !== undefined) lastActivity = partial.activity;
       if (partial?.finalOutput !== undefined) lastOutput = partial.finalOutput;
+
       const node = tree.get(id);
       onUpdate?.({
         content: [{ type: "text", text: lastOutput }],
@@ -229,6 +213,7 @@ export function spawn(
           }
         },
         onToolOutput: (toolName, delta) => {
+          // Last non-empty line, truncated for preview
           const line = delta.trimEnd().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
           if (line) {
             emitUpdate({ activity: `${toolName}: ${line}` });
@@ -245,7 +230,6 @@ export function spawn(
         },
       });
 
-      // Race: session completes normally OR /minions bg detaches it
       const raceResult = await Promise.race([
         sessionPromise.then((r) => ({ type: "completed" as const, result: r })),
         detachPromise.then(() => ({ type: "detached" as const })),
@@ -271,17 +255,20 @@ export function spawn(
         };
       }
 
-      // Normal completion path
       const result = raceResult.result;
       const currentNode = tree.get(id);
+
+      // Check tree node for "aborted" first — external /halt sets the tree status
+      // before session.prompt() resolves, so the result alone can't distinguish halt from error
       const status = currentNode?.status === "aborted"
         ? "aborted"
         : result.exitCode === 0 ? "completed" : "failed";
 
       if (status !== "aborted") {
-        logger.debug("spawn:tool", status, { id, exitCode: result.exitCode, outputLen: result.finalOutput.length });
+        logger.info("spawn:tool", status, { id, exitCode: result.exitCode, outputLen: result.finalOutput.length });
         tree.updateStatus(id, status, result.exitCode, result.error);
       }
+
       tree.updateUsage(id, result.usage);
 
       const node = tree.get(id);
@@ -296,11 +283,11 @@ export function spawn(
         throw new Error(`[HALTED] Minion ${name} (${id}) was stopped by the user. This is intentional — do NOT retry or re-spawn.`);
       }
       if (result.exitCode !== 0) {
-        throw new Error(result.error ?? `Agent exited with code ${result.exitCode}`);
+        throw new Error(`Minion ${name} (${id}) failed: ${result.error ?? `exited with code ${result.exitCode}`}`);
       }
 
       return {
-        content: [{ type: "text", text: result.finalOutput || "(no output)" }],
+        content: [{ type: "text", text: `Minion ${name} (${id}) completed.\n\n${result.finalOutput || "(no output)"}` }],
         details,
       };
     } finally {
@@ -312,10 +299,7 @@ export function spawn(
   };
 }
 
-// ---------------------------------------------------------------------------
-// spawn_bg tool — background (fire-and-forget, returns immediately)
-// ---------------------------------------------------------------------------
-
+// Background spawn (fire-and-forget, returns immediately)
 export function spawnBg(
   tree: AgentTree,
   handles: Map<string, AbortController>,
@@ -333,8 +317,7 @@ export function spawnBg(
     const id = generateId();
     const name = pickMinionName(tree, id);
     const config = resolveConfig(params, name, ctx.cwd);
-
-    logger.debug("spawn:tool", "start-bg", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
+    logger.info("spawn:tool", "start-bg", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
 
     const controller = new AbortController();
     handles.set(id, controller);

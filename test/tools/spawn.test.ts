@@ -103,13 +103,14 @@ describe("spawn", () => {
     );
   });
 
-  it("returns final output as content text", async () => {
+  it("returns final output with minion identity", async () => {
     const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
     const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
 
     const result = await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx());
     const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toBe("done");
+    expect(text).toContain("done");
+    expect(text).toMatch(/Minion \w+ \(\w+\)/);
   });
 
   it("spawns ephemeral agent when no agent param", async () => {
@@ -126,7 +127,8 @@ describe("spawn", () => {
       expect.anything(),
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toBe("done");
+    expect(text).toContain("done");
+    expect(text).toMatch(/Minion \w+ \(\w+\)/);
   });
 
   it("ephemeral agent applies model override", async () => {

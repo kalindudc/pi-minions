@@ -8,7 +8,8 @@ export interface AgentConfig {
   tools?: string[];
   model?: string;
   thinking?: ThinkingLevel;
-  maxTurns?: number;
+  steps?: number;
+  timeout?: number;
   systemPrompt: string;
   source: AgentSource;
   filePath: string;

@@ -28,7 +28,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --reporter=verbose 'test/**/*.integration.test.ts'",
+    "test:e2e": "task test:e2e",
     "typecheck": "tsc --noEmit"
   }
 }

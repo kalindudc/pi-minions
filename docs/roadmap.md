@@ -11,6 +11,7 @@
 - [x] tools for minion/agent discovery (list_agents tool)
 - [ ] minion recursion with depth limits (agent frontmatter config)
 - [ ] minion chaining (output of one feeds into another)
+- [ ] bug: foreground minions cannot be parallelized, even if that is the intent of the LLM
 
 ### observability
 - [x] simple widget to see background minion count
@@ -19,7 +20,7 @@
 - [x] activity tracking with live progress updates
 - [x] detailed minion status (show_minion tool)
 - [x] list running and pending minions (list_minions tool)
-- [ ] standardize debug logging
+- [x] standardize debug logging
 - [ ] TUI dashboard to view full conversation and activity with keyboard hotkeys
 - [ ] minion history/audit trail across sessions
 - [ ] visual minion tree/hierarchy display
@@ -27,17 +28,17 @@
 - [ ] performance metrics and analytics dashboard
 
 ### config and support
+- [x] step/turn count limits per minion
+- [x] timeout configuration per minion or globally
 - [ ] bring background minions to foreground with queue
 - [ ] configurable defaults for the extension (via pi config)
-- [ ] step/turn count limits per minion
-- [ ] timeout configuration per minion or globally
 - [ ] cost budgeting per minion with warnings/auto-halt
 - [ ] resource limits (token limits, time limits, turn limits)
 - [ ] priority queue for background minions
 - [ ] batch spawn operations (spawn multiple related tasks)
 
 ### quality control
-- [ ] improve default prompt of generic minions to limit verbosity
+- [x] improve default prompt of generic minions to limit verbosity
 - [ ] error recovery with retry mechanisms (user confirmation)
 - [ ] better error messages with actionable suggestions
 - [ ] automatic delegation instructions for parent sessions

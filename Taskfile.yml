@@ -38,16 +38,6 @@ tasks:
         echo "  task dev         load extension into pi"
         echo "  task test:e2e    smoke test in pi print mode"
 
-  test:
-    desc: "Run unit tests"
-    cmds:
-      - npx vitest run
-
-  typecheck:
-    desc: "Run TypeScript type checker"
-    cmds:
-      - npx tsc --noEmit
-
   dev:
     desc: "Load extension into pi. Open 'task logs' in a second terminal to see debug output."
     env:
@@ -62,28 +52,34 @@ tasks:
       - echo "" > ./tmp/logs/debug.log
       - |
         echo ""
-        echo "  ┌─────────────────────────────────────────────┐"
+        echo "  ┌───────────────────────────────────────────-──┐"
         echo "  │  pi-minions dev session starting             │"
         echo "  │  Open a second terminal and run: task logs   │"
         echo "  │  Log: ./tmp/logs/debug.log                   │"
-        echo "  └─────────────────────────────────────────────┘"
+        echo "  └───────────────────────────────────────────-──┘"
         echo ""
       - pi -e ./src/index.ts
 
-  test:e2e:
-    desc: "Smoke test the extension in pi print mode"
-    env:
-      PI_MINIONS_DEBUG: "1"
+  typecheck:
+    desc: "Run TypeScript type checker"
     cmds:
-      - mkdir -p ./tmp/logs
-      - pi -e ./src/index.ts -p "List available minion agents"
-      - echo "--- logs ---"
-      - cat ./tmp/logs/debug.log
+      - npx tsc --noEmit
+
+  test:
+    desc: "Run unit tests"
+    cmds:
+      - npx vitest run
+
+  test:e2e:
+    desc: "Run e2e safety control tests against real pi + LLM (usage: task test:e2e [-- filter])"
+    cmds:
+      - ./scripts/e2e.sh {{.CLI_ARGS}}
 
   logs:
     desc: "Tail debug log in real time (run in a second terminal alongside 'task dev')"
     cmds:
-      - mkdir -p ./tmp/logs
-      - touch ./tmp/logs/debug.log
+      - rm -rf /tmp/logs/pi-minions
+      - mkdir -p /tmp/logs/pi-minions && touch /tmp/logs/pi-minions/debug.log
+      - ln -s /tmp/logs/pi-minions tmp/logs
       - echo "Tailing ./tmp/logs/debug.log  (Ctrl+C to stop)"
       - tail -f -n 100 ./tmp/logs/debug.log

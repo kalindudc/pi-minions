@@ -45,7 +45,8 @@ export function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig
         ? (frontmatter.thinking as ThinkingLevel)
         : undefined;
 
-    const maxTurns = frontmatter.max_turns ? parseInt(frontmatter.max_turns, 10) || undefined : undefined;
+    const steps = frontmatter.steps || frontmatter.max_turns ? parseInt(frontmatter.steps, 10) || parseInt(frontmatter.max_turns, 10) || undefined : undefined;
+    const timeout = frontmatter.timeout ? parseInt(frontmatter.timeout, 10) || undefined : undefined;
 
     agents.push({
       name,
@@ -53,7 +54,8 @@ export function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig
       tools: tools && tools.length > 0 ? tools : undefined,
       model: frontmatter.model,
       thinking,
-      maxTurns,
+      steps,
+      timeout,
       systemPrompt: body.trim(),
       source,
       filePath,
@@ -83,6 +85,8 @@ export function discoverAgents(
   scope: "user" | "project" | "both",
 ): { agents: AgentConfig[]; projectAgentsDir: string | null } {
   const agentDir = getAgentDir();
+
+  // agents from global dirs, project agents from .pi/agents/
   const userDir = join(agentDir, "agents");
   const minionsDir = join(agentDir, "minions");
   const projectAgentsDir = findProjectAgentsDir(cwd);

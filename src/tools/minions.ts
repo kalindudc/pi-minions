@@ -7,9 +7,7 @@ import type { MinionSession } from "../spawn.js";
 import { formatDuration, formatUsage } from "../render.js";
 import type { DetachHandle } from "./spawn.js";
 
-// ---------------------------------------------------------------------------
 // list_minions
-// ---------------------------------------------------------------------------
 
 export const ListMinionsParams = Type.Object({});
 export type ListMinionsParams = Static<typeof ListMinionsParams>;
@@ -37,6 +35,7 @@ export function listMinions(
     if (running.length) {
       lines.push(`Running (${running.length}):`);
       for (const n of running) {
+        // Detach handle exists = foreground (handle is what enables sending to background)
         const mode = detachHandles.has(n.id) ? "foreground" : "background";
         const activity = n.lastActivity ?? n.task.slice(0, 60);
         lines.push(`  ${n.name} (${n.id}) [${mode}] — ${activity}`);
@@ -52,9 +51,7 @@ export function listMinions(
   };
 }
 
-// ---------------------------------------------------------------------------
 // steer_minion
-// ---------------------------------------------------------------------------
 
 export const SteerMinionParams = Type.Object({
   target: Type.String({ description: "Minion ID or name to steer" }),
@@ -92,9 +89,7 @@ export function steerMinion(
   };
 }
 
-// ---------------------------------------------------------------------------
 // show_minion
-// ---------------------------------------------------------------------------
 
 export const ShowMinionParams = Type.Object({
   target: Type.String({ description: "Minion ID or name to inspect" }),
@@ -124,10 +119,12 @@ export function showMinion(
       lines.push(`${node.name} (${node.id})`);
       lines.push(`  Status: ${node.status}`);
       lines.push(`  Task: ${node.task}`);
+
       if (node.status === "running") {
         lines.push(`  Running for: ${formatDuration(Date.now() - node.startTime)}`);
         if (node.lastActivity) lines.push(`  Activity: ${node.lastActivity}`);
       }
+
       if (node.endTime) lines.push(`  Duration: ${formatDuration(node.endTime - node.startTime)}`);
       lines.push(`  Usage: ${formatUsage(node.usage)}`);
       if (node.error) lines.push(`  Error: ${node.error}`);

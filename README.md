@@ -1,6 +1,8 @@
-# pi-minions
+# pi-minions (oo)
 
 Minimal recursive subagent orchestration for pi.
+
+![multi_minions](./docs/assets/multi_minions.png)
 
 ## Install
 

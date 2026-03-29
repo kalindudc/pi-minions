@@ -1,22 +1,19 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-const LOG_DIR = join(REPO_ROOT, "tmp", "logs");
+const LOG_DIR = join("/tmp", "logs", "pi-minions");
 export const LOG_FILE = join(LOG_DIR, "debug.log");
 
-// ensure directory exists at module load time
+// Ensure directory exists at module load time
 try { mkdirSync(LOG_DIR, { recursive: true }); } catch { /* ignore */ }
 
 const val = process.env["PI_MINIONS_DEBUG"];
-const enabled = val === "1" || val === "true";
+const debugEnabled = val === "1" || val === "true";
 
-function write(scope: string, msg: string, data?: unknown): void {
-  if (!enabled) return;
+function write(level: string, scope: string, msg: string, data?: unknown): void {
   const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
   const suffix = data !== undefined ? " " + JSON.stringify(data) : "";
-  const line = `[${ts}] [${scope}] ${msg}${suffix}\n`;
+  const line = `[${ts}] [${level}] [${scope}] ${msg}${suffix}\n`;
   try {
     appendFileSync(LOG_FILE, line);
   } catch {
@@ -25,5 +22,17 @@ function write(scope: string, msg: string, data?: unknown): void {
 }
 
 export const logger = {
-  debug: write,
+  debug(scope: string, msg: string, data?: unknown): void {
+    if (!debugEnabled) return;
+    write("DEBUG", scope, msg, data);
+  },
+  info(scope: string, msg: string, data?: unknown): void {
+    write("INFO", scope, msg, data);
+  },
+  warn(scope: string, msg: string, data?: unknown): void {
+    write("WARN", scope, msg, data);
+  },
+  error(scope: string, msg: string, data?: unknown): void {
+    write("ERROR", scope, msg, data);
+  },
 };

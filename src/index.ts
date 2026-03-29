@@ -20,6 +20,7 @@ import { logger, LOG_FILE } from "./logger.js";
 export default function (pi: ExtensionAPI): void {
   logger.debug("extension", "loaded", { logFile: LOG_FILE });
 
+  // Shared state across all minion lifecycle, sessions, and abort controllers
   const tree = new AgentTree();
   const handles = new Map<string, AbortController>();
   const queue = new ResultQueue();
@@ -154,6 +155,7 @@ export default function (pi: ExtensionAPI): void {
       return;
     }
     const allRunning = tree.getRunning();
+    // No detach handle = already in background (foreground spawns have a handle to enable detach)
     const bgRunning = allRunning.filter((n) => !detachHandles.has(n.id));
     const count = bgRunning.length;
     if (count === lastBgCount) return;

@@ -11,9 +11,9 @@ describe("defaultMinionTemplate", () => {
     expect(c.filePath).toBe("");
   });
 
-  it("system prompt establishes isolation context", () => {
+  it("system prompt establishes minion identity", () => {
     const c = defaultMinionTemplate("kevin");
-    expect(c.systemPrompt).toContain("autonomous subagent");
+    expect(c.systemPrompt).toContain("minion");
     expect(c.systemPrompt).toContain("isolated context");
   });
 
@@ -21,7 +21,6 @@ describe("defaultMinionTemplate", () => {
     const c = defaultMinionTemplate("kevin");
     expect(c.systemPrompt).toContain("STOP");
     expect(c.systemPrompt).toContain("Do NOT fabricate");
-    expect(c.systemPrompt).toContain("Do NOT silently retry");
   });
 
   it("system prompt includes structured output format", () => {
@@ -29,6 +28,10 @@ describe("defaultMinionTemplate", () => {
     expect(c.systemPrompt).toContain("## Result");
     expect(c.systemPrompt).toContain("## Files");
     expect(c.systemPrompt).toContain("## Notes");
+  });
+
+  it("system prompt is under 1000 characters", () => {
+    expect(DEFAULT_MINION_PROMPT.length).toBeLessThan(1000);
   });
 
   it("applies model override", () => {
@@ -46,11 +49,23 @@ describe("defaultMinionTemplate", () => {
     expect(c.tools).toEqual(["read", "bash"]);
   });
 
+  it("accepts steps override", () => {
+    const c = defaultMinionTemplate("t", { steps: 10 });
+    expect(c.steps).toBe(10);
+  });
+
+  it("accepts timeout override", () => {
+    const c = defaultMinionTemplate("t", { timeout: 60000 });
+    expect(c.timeout).toBe(60000);
+  });
+
   it("leaves optional fields undefined when no overrides", () => {
     const c = defaultMinionTemplate("jerry");
     expect(c.model).toBeUndefined();
     expect(c.thinking).toBeUndefined();
     expect(c.tools).toBeUndefined();
+    expect(c.steps).toBeUndefined();
+    expect(c.timeout).toBeUndefined();
   });
 });
 

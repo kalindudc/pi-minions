@@ -3,6 +3,8 @@ dist/
 *.tgz
 .pi/*
 !.pi/prompts
+!.pi/agents
+!.pi/skills
 
 # DO NOT MODIFY THIS
 # The entire tmp/ directory must be ignored
