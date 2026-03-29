@@ -66,19 +66,24 @@ if git rev-parse "v$VERSION" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Check working directory (should only have package.json and CHANGELOG.md modified)
-MODIFIED=$(git status --porcelain | grep -E '^(M| M)' | awk '{print $2}' | sort)
-EXPECTED=$(echo -e "CHANGELOG.md\npackage.json" | sort)
+# Check working directory (only release-related files should be modified)
+UNEXPECTED=""
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+  case "$file" in
+    package.json|CHANGELOG.md|README.md|AGENTS.md|docs/*) ;;
+    *) UNEXPECTED="${UNEXPECTED}  ${file}"$'\n' ;;
+  esac
+done < <(git status --porcelain | awk '{print $2}' | sort)
 
-if [ "$MODIFIED" != "$EXPECTED" ]; then
+if [ -n "$UNEXPECTED" ]; then
   echo "❌ Error: Unexpected file changes detected"
   echo ""
-  echo "Expected only:"
-  echo "  M CHANGELOG.md"
-  echo "  M package.json"
+  echo "Allowed release files:"
+  echo "  package.json, CHANGELOG.md, README.md, AGENTS.md, docs/*"
   echo ""
-  echo "Found:"
-  git status --short
+  echo "Unexpected:"
+  printf "%s" "$UNEXPECTED"
   echo ""
   echo "Commit or stash other changes first."
   exit 1
@@ -87,7 +92,7 @@ fi
 # Show what will be committed
 echo "📝 Changes to be committed:"
 echo ""
-git diff --stat package.json CHANGELOG.md
+git diff --stat
 echo ""
 
 # Confirm with user
@@ -101,7 +106,7 @@ fi
 # Create commit
 echo ""
 echo "📦 Creating commit..."
-git add package.json CHANGELOG.md
+git add -u
 git commit -m "chore: release v$VERSION"
 
 # Create tag
@@ -112,6 +117,11 @@ git tag "v$VERSION"
 echo "📤 Pushing to origin..."
 git push origin main
 git push origin "v$VERSION"
+
+# Update floating latest tag
+echo "🏷️  Updating latest tag..."
+git tag -f latest
+git push origin latest --force
 
 echo ""
 echo "✅ Release v$VERSION complete!"
