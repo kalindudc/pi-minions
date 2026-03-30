@@ -27,6 +27,7 @@ tasks:
         echo "  pi $(pi --version 2>/dev/null || echo '(version unavailable)')"
       - |
         echo "==> Installing npm dependencies..."
+        npm install -g 0x
         npm install
         echo "  ✓ Dependencies installed"
       - |
@@ -95,3 +96,28 @@ tasks:
       - ln -s /tmp/logs/pi-minions tmp/logs
       - echo "Tailing ./tmp/logs/debug.log  (Ctrl+C to stop)"
       - tail -f -n 100 ./tmp/logs/debug.log
+
+  test:bench:
+    desc: "Run all performance tests (benchmarks + CPU profile + heap profile)"
+    cmds:
+      - mkdir -p tmp/profiles
+      - echo "==> Running benchmark tests..."
+      - npx vitest bench test/perf/ --run
+      - echo "==> Running CPU profiling..."
+      - NODE_OPTIONS='--cpu-prof --cpu-prof-dir=./tmp/profiles' npx vitest bench test/perf/ --run
+      - echo "==> Running heap profiling..."
+      - NODE_OPTIONS='--heap-prof --heap-prof-dir=./tmp/profiles' npx vitest bench test/perf/ --run
+      - echo ""
+      - echo "Profiles saved to tmp/profiles/"
+      - ls -lh tmp/profiles/ 2>/dev/null || echo "No profiles generated"
+
+  profile:
+    desc: "Generate human-readable report and flamegraph from profiles"
+    cmds:
+      - |
+        if command -v 0x &>/dev/null; then
+          echo "==> Generating flamegraph with 0x..."
+          0x --output-dir ./tmp/profiles -- node ./node_modules/.bin/vitest bench test/perf/ --run
+        else
+          echo "==> Skipping flamegraph (0x not installed). Install with: npm install -g 0x"
+        fi

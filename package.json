@@ -44,6 +44,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "task test:e2e",
+    "test:bench": "vitest bench",
     "typecheck": "tsc --noEmit"
   }
 }
