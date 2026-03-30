@@ -12,7 +12,7 @@ A hands-on walkthrough — from installation to spawning your first minion, runn
 ## Installation
 
 ```bash
-pi install https://github.com/kalindudc/pi-minions@latest
+pi install https://github.com/kalindudc/pi-minions
 ```
 
 That's it. pi-minions registers its tools and commands automatically on next session start.

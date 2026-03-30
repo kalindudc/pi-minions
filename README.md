@@ -21,7 +21,7 @@ pi-minions solves this by letting your agent spawn **minions** — isolated sub-
 ## Install
 
 ```bash
-pi install https://github.com/kalindudc/pi-minions@latest
+pi install https://github.com/kalindudc/pi-minions
 ```
 
 ## Quick start
