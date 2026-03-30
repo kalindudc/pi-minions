@@ -34,6 +34,34 @@ function createTranscriptWriter(id: string, name: string, task: string) {
   return { write, path };
 }
 
+/**
+ * Extract the last assistant message text from a session's message history.
+ * Messages can have content as a plain string or as an array of content blocks
+ * (the Claude API format: [{type: "text", text: "..."}]).
+ */
+function extractLastAssistantText(messages: unknown[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as Record<string, unknown> | undefined;
+    if (!msg || msg["role"] !== "assistant") continue;
+
+    const content = msg["content"];
+
+    // Plain string content
+    if (typeof content === "string") return content.trim();
+
+    // Content block array — join all text blocks
+    if (Array.isArray(content)) {
+      const text = content
+        .filter((b: any) => b.type === "text" && b.text)
+        .map((b: any) => b.text as string)
+        .join("");
+      if (text.trim()) return text.trim();
+    }
+  }
+
+  return "";
+}
+
 // Callbacks for streaming progress to the parent
 export interface MinionCallbacks {
   onToolActivity?: (activity: { type: "start" | "end"; toolName: string }) => void;
@@ -275,32 +303,4 @@ export async function runMinionSession(
     abortCleanup?.();
     session.dispose();
   }
-}
-
-/**
- * Extract the last assistant message text from a session's message history.
- * Messages can have content as a plain string or as an array of content blocks
- * (the Claude API format: [{type: "text", text: "..."}]).
- */
-function extractLastAssistantText(messages: unknown[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i] as Record<string, unknown> | undefined;
-    if (!msg || msg["role"] !== "assistant") continue;
-
-    const content = msg["content"];
-
-    // Plain string content
-    if (typeof content === "string") return content.trim();
-
-    // Content block array — join all text blocks
-    if (Array.isArray(content)) {
-      const text = content
-        .filter((b: any) => b.type === "text" && b.text)
-        .map((b: any) => b.text as string)
-        .join("");
-      if (text.trim()) return text.trim();
-    }
-  }
-
-  return "";
 }
