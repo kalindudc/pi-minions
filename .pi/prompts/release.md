@@ -25,6 +25,11 @@ Run checks, STOP if any fail:
    ```
    - No commits → inform user "No changes since last release", STOP
    - No tags → suggest v0.1.0 or v1.0.0, ask user preference
+5. Version references in docs:
+   ```bash
+   grep -rn "$(grep '"version"' package.json | cut -d'"' -f4)" docs/ README.md *.md 2>/dev/null
+   ```
+   - Note any files with hardcoded versions for update in step below
 
 ## Parse Commits
 
@@ -72,7 +77,21 @@ Rules:
 
 ## Update documentation
 
-Update all version references in docs, READMEs and AGENT.md
+ALWAYS update version references in documentation:
+
+1. Search for current version in all docs:
+   ```bash
+   OLD_VERSION=$(grep '"version"' package.json | cut -d'"' -f4)
+   grep -rn "$OLD_VERSION" docs/ README.md *.md 2>/dev/null
+   ```
+
+2. Update each found reference to the NEW_VERSION (A.B.C)
+   Common locations:
+   - `README.md` - version badge/shield
+   - `docs/*.md` - any hardcoded version references
+   - `AGENTS.md` - if version is mentioned
+
+3. Add doc updates to the file change list and diff
 
 ## Present Plan
 
@@ -99,8 +118,9 @@ CHANGELOG entry:
 Ready to create release vA.B.C? I will:
 1. Update package.json version
 2. Update CHANGELOG.md
-3. Show diff for review
-4. Instruct you to run release script
+3. Update version references in docs/README (if any)
+4. Show diff for review
+5. Instruct you to run release script
 ```
 
 Ask for user confirmation.
@@ -109,8 +129,9 @@ Ask for user confirmation.
 
 1. Edit `package.json` → update version to A.B.C
 2. Edit `CHANGELOG.md` → insert new entry after `## [Unreleased]`
-3. Show diff: `git diff package.json CHANGELOG.md`
-4. Instruct user:
+3. Update any version references in docs/README files found in preflight
+4. Show diff: `git diff package.json CHANGELOG.md [other updated files]`
+5. Instruct user:
    ```
    ✅ Files prepared for release vA.B.C
 
