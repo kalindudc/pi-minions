@@ -95,12 +95,10 @@ export function renderResult(
 
     const frame = SPINNER[(details.spinnerFrame ?? 0) % SPINNER.length];
     const activity = details.activity ?? "thinking…";
-    const hint = theme.fg("dim", `  ·  /minions bg ${details.name ?? ""}`);
     const line =
       theme.fg("accent", frame) + " " +
       theme.fg("accent", details.name ?? "minion") +
       (details.id ? theme.fg("dim", ` (${details.id})`) : "") +
-      hint +
       "\n" + theme.fg("dim", `  ⎿  ${activity}`);
     return new Text(line, 0, 0);
   }

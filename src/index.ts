@@ -17,6 +17,7 @@ import { createHaltHandler } from "./commands/halt.js";
 import { createMinionsHandler } from "./commands/minions.js";
 import { renderCall, renderResult } from "./render.js";
 import { buildFooterFactory } from "./footer.js";
+import { createStatusTracker, MINIONS_STATUS_KEY } from "./status.js";
 import { logger, LOG_FILE } from "./logger.js";
 
 export default function (pi: ExtensionAPI): void {
@@ -149,48 +150,31 @@ export default function (pi: ExtensionAPI): void {
     });
   });
 
-  // Background minion status in footer
-  const BG_STATUS_KEY = "minions-bg";
+  // Minion status tracking (background and foreground)
+  const statusTracker = createStatusTracker(tree, detachHandles);
   let cachedUi: ExtensionContext["ui"] | null = null;
   let cachedCtx: ExtensionContext | null = null;
   let cachedModel: Model<any> | undefined;
-  let lastBgCount = -1;
-
-  function refreshBgStatus(): void {
-    if (!cachedUi) {
-      logger.debug("bg-status", "skip-no-ui");
-      return;
-    }
-    const allRunning = tree.getRunning();
-    // No detach handle = already in background (foreground spawns have a handle to enable detach)
-    const bgRunning = allRunning.filter((n) => !detachHandles.has(n.id));
-    const count = bgRunning.length;
-    if (count === lastBgCount) return;
-    logger.debug("bg-status", "update", {
-      from: lastBgCount, to: count,
-      allRunning: allRunning.map((n) => `${n.name}(${n.id})`),
-      detachHandles: [...detachHandles.keys()],
-    });
-    lastBgCount = count;
-    const { theme } = cachedUi;
-    cachedUi.setStatus(BG_STATUS_KEY, count === 0
-      ? undefined
-      : theme.fg("muted", `background minions: ${count} — /minions to manage`));
-  }
 
   // Event-driven: tree changes + tool boundaries trigger status refresh.
   // tree.onChange catches: add (bg spawn), updateStatus (complete/fail/abort)
   // tool_execution_end catches: detach (detachHandles changes, tree unchanged)
-  tree.onChange(refreshBgStatus);
+  tree.onChange(() => statusTracker.refresh());
   pi.on("tool_execution_end", (event) => {
-    logger.debug("bg-status", "tool_execution_end", { tool: event.toolName });
-    refreshBgStatus();
+    logger.debug("status", "tool_execution_end", { tool: event.toolName });
+    statusTracker.refresh();
   });
 
   pi.on("session_start", (_event, ctx) => {
     cachedCtx = ctx;
     cachedModel = ctx.model;
     cachedUi = ctx.ui;
+    statusTracker.setUi(cachedUi);
+    
+    // Clean up legacy status keys from previous versions
+    cachedUi.setStatus("minions-bg", undefined);
+    cachedUi.setStatus("minions-fg", undefined);
+    
     cachedUi.setFooter(buildFooterFactory({
       getCtx: () => cachedCtx,
       getModel: () => cachedModel,

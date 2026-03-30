@@ -67,8 +67,15 @@ tasks:
 
   test:
     desc: "Run unit tests"
+    vars:
+      JSON_FLAG: '{{.json | default "false"}}'
     cmds:
-      - npx vitest run
+      - |
+        if [ "{{.JSON_FLAG}}" = "true" ]; then
+          npx vitest run --reporter=json
+        else
+          npx vitest run
+        fi
 
   test:e2e:
     desc: "Run e2e safety control tests against real pi + LLM (usage: task test:e2e [-- filter])"

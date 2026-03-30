@@ -102,7 +102,7 @@ describe("renderResult", () => {
     bold: (text: string) => text,
   } as any;
 
-  it("streaming render includes /minions bg hint", () => {
+  it("streaming render does not include inline /minions bg hint", () => {
     const details = {
       id: "abc", name: "kevin", agentName: "kevin", task: "t",
       status: "running", usage: emptyUsage(), finalOutput: "",
@@ -117,7 +117,7 @@ describe("renderResult", () => {
     const lines = result.render(100);
     const text = lines.join("\n");
     expect(text).toContain("kevin");
-    expect(text).toContain("/minions bg");
+    expect(text).not.toContain("/minions bg");
   });
 
   it("streaming render caches name/id to state", () => {

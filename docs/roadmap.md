@@ -14,6 +14,7 @@
 - [x] add support for the `latest` tag when making releases
 - [ ] minion recursion with depth limits (agent frontmatter config)
 - [ ] minion chaining (output of one feeds into another)
+- [ ] bug when the parent uses the halt tool, the aborted minion still sends back a user message, this is wasteful
 
 ### observability
 - [x] simple widget to see background minion count
