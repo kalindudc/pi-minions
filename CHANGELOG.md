@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-03-31
+
+- fix: memory leak in result queue, logger blocking IO, progress spinner churn, background minion tool call rendering
+- feat: add performance testing suite and bottleneck analysis skill
+- docs: remove @latest tag recommendation, update roadmap tasks
+- chore: re-organize skills and code
+
 ## [0.5.1] - 2026-03-30
 
 - fix: /minions now behaves instantaneously when there are no foreground minions
