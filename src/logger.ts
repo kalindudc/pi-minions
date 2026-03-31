@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const LOG_DIR = join("/tmp", "logs", "pi-minions");
@@ -10,15 +11,37 @@ try { mkdirSync(LOG_DIR, { recursive: true }); } catch { /* ignore */ }
 const val = process.env["PI_MINIONS_DEBUG"];
 const debugEnabled = val === "1" || val === "true";
 
+let _batch: string[] = [];
+let _flushTimer: ReturnType<typeof setImmediate> | null = null;
+let _writePromise: Promise<void> = Promise.resolve();
+
+function scheduleFlush(): void {
+  if (_flushTimer !== null) return;
+  _flushTimer = setImmediate(() => {
+    _flushTimer = null;
+    if (_batch.length === 0) return;
+    const data = _batch.join("");
+    _batch = [];
+    _writePromise = appendFile(LOG_FILE, data).catch(() => {});
+  });
+}
+
 function write(level: string, scope: string, msg: string, data?: unknown): void {
   const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
   const suffix = data !== undefined ? " " + JSON.stringify(data) : "";
-  const line = `[${ts}] [${level}] [${scope}] ${msg}${suffix}\n`;
-  try {
-    appendFileSync(LOG_FILE, line);
-  } catch {
-    // never throw from a logger
+  _batch.push(`[${ts}] [${level}] [${scope}] ${msg}${suffix}\n`);
+  scheduleFlush();
+}
+
+/** Drain pending log writes. */
+export async function flushLogger(): Promise<void> {
+  if (_flushTimer !== null) { clearImmediate(_flushTimer); _flushTimer = null; }
+  if (_batch.length > 0) {
+    const data = _batch.join("");
+    _batch = [];
+    _writePromise = appendFile(LOG_FILE, data).catch(() => {});
   }
+  await _writePromise;
 }
 
 export const logger = {

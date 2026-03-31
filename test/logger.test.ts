@@ -23,8 +23,9 @@ describe("logger", () => {
 
   it("debug writes when PI_MINIONS_DEBUG=1", async () => {
     vi.stubEnv("PI_MINIONS_DEBUG", "1");
-    const { logger } = await import("../src/logger.js");
+    const { logger, flushLogger } = await import("../src/logger.js");
     logger.debug("test", "hello debug");
+    await flushLogger();
     const log = readLog();
     expect(log).toContain("[DEBUG]");
     expect(log).toContain("[test]");
@@ -41,8 +42,9 @@ describe("logger", () => {
 
   it("info always writes regardless of debug flag", async () => {
     vi.stubEnv("PI_MINIONS_DEBUG", "");
-    const { logger } = await import("../src/logger.js");
+    const { logger, flushLogger } = await import("../src/logger.js");
     logger.info("test", "info message");
+    await flushLogger();
     const log = readLog();
     expect(log).toContain("[INFO]");
     expect(log).toContain("info message");
@@ -50,8 +52,9 @@ describe("logger", () => {
 
   it("warn always writes regardless of debug flag", async () => {
     vi.stubEnv("PI_MINIONS_DEBUG", "");
-    const { logger } = await import("../src/logger.js");
+    const { logger, flushLogger } = await import("../src/logger.js");
     logger.warn("test", "warn message");
+    await flushLogger();
     const log = readLog();
     expect(log).toContain("[WARN]");
     expect(log).toContain("warn message");
@@ -59,8 +62,9 @@ describe("logger", () => {
 
   it("error always writes regardless of debug flag", async () => {
     vi.stubEnv("PI_MINIONS_DEBUG", "");
-    const { logger } = await import("../src/logger.js");
+    const { logger, flushLogger } = await import("../src/logger.js");
     logger.error("test", "error message");
+    await flushLogger();
     const log = readLog();
     expect(log).toContain("[ERROR]");
     expect(log).toContain("error message");
@@ -68,8 +72,9 @@ describe("logger", () => {
 
   it("includes JSON data when provided", async () => {
     vi.stubEnv("PI_MINIONS_DEBUG", "1");
-    const { logger } = await import("../src/logger.js");
+    const { logger, flushLogger } = await import("../src/logger.js");
     logger.info("test", "with data", { key: "value" });
+    await flushLogger();
     const log = readLog();
     expect(log).toContain('{"key":"value"}');
   });
@@ -81,8 +86,9 @@ describe("logger", () => {
 
   it("uses correct format: [HH:MM:SS.mmm] [LEVEL] [scope] message", async () => {
     vi.stubEnv("PI_MINIONS_DEBUG", "1");
-    const { logger } = await import("../src/logger.js");
+    const { logger, flushLogger } = await import("../src/logger.js");
     logger.info("myscope", "test format");
+    await flushLogger();
     const log = readLog();
     expect(log).toMatch(/\[\d{2}:\d{2}:\d{2}\.\d{3}\] \[INFO\] \[myscope\] test format/);
   });

@@ -204,6 +204,35 @@ describe("spawn", () => {
     await new Promise((r) => setTimeout(r, 10));
   });
 
+  it("spawn_bg calls onUpdate immediately with confirmation message", async () => {
+    let sessionResolve: (v: any) => void;
+    vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
+
+    const { tree, handles, queue, pi, sessions } = createDeps();
+    const execute = spawnBg(tree, handles, queue, pi, sessions);
+
+    const updates: any[] = [];
+    const onUpdate = (update: any) => {
+      updates.push(update);
+    };
+
+    const result = await execute(
+      "tc-1", { task: "bg task" }, undefined, onUpdate, createCtx(),
+    );
+
+    // onUpdate should have been called immediately before returning
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.details!.status).toBe("running");
+    expect(updates[0]!.details!.finalOutput).toBe("Spawned in background");
+
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Spawned");
+    expect(text).toContain("background");
+
+    sessionResolve!({ exitCode: 0, finalOutput: "done", usage: { ...emptyUsage() } });
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
   it("foreground sets detachHandle before tree.add", async () => {
     const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
 
@@ -292,9 +321,9 @@ describe("spawn", () => {
     sessionResolve!({ exitCode: 0, finalOutput: "result output", usage: { ...emptyUsage(), turns: 3 } });
     await new Promise((r) => setTimeout(r, 50));
 
-    // Result was queued
-    expect(queue.getPending()).toHaveLength(0); // auto-accepted
-    expect(queue.get(tree.getRoots()[0]!.id)).toBeDefined();
+    // Result was queued and auto-accepted (deleted from queue after delivery)
+    expect(queue.getPending()).toHaveLength(0);
+    expect(queue.get(tree.getRoots()[0]!.id)).toBeUndefined();
 
     // Auto-delivered to parent
     expect(pi.sendUserMessage).toHaveBeenCalledWith(

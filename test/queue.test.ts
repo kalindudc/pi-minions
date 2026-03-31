@@ -41,11 +41,11 @@ describe("ResultQueue", () => {
     expect(pending.map((r) => r.id)).toEqual(["a", "c"]);
   });
 
-  it("accept transitions pending to accepted", () => {
+  it("accept removes delivered result from queue", () => {
     const q = new ResultQueue();
     q.add(createResult({ id: "a" }));
     q.accept("a");
-    expect(q.get("a")!.status).toBe("accepted");
+    expect(q.get("a")).toBeUndefined();
   });
 
   it("accept is no-op for non-pending", () => {

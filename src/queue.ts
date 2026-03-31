@@ -21,7 +21,7 @@ export class ResultQueue {
   accept(id: string): void {
     const result = this.results.get(id);
     if (!result || result.status !== "pending") return;
-    result.status = "accepted";
+    this.results.delete(id);
     this.notify();
   }
 

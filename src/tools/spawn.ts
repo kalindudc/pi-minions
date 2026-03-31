@@ -193,7 +193,7 @@ export function spawn(
       });
     };
 
-    const spinnerInterval = setInterval(() => { spinnerFrame++; emitUpdate(); }, 80);
+    const spinnerInterval = setInterval(() => { spinnerFrame++; emitUpdate(); }, 200);
     let detached = false;
 
     try {
@@ -316,7 +316,7 @@ export function spawnBg(
     _toolCallId: string,
     params: SpawnBgToolParams,
     _signal: AbortSignal | undefined,
-    _onUpdate: unknown,
+    onUpdate: AgentToolUpdateCallback<SpawnToolDetails> | undefined,
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SpawnToolDetails>> {
     const id = generateId();
@@ -342,7 +342,7 @@ export function spawnBg(
 
     handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, handles, queue, pi);
 
-    return {
+    const result: AgentToolResult<SpawnToolDetails> = {
       content: [{ type: "text", text: `Spawned ${name} (${id}) in background. Results will be delivered when complete.` }],
       details: {
         id, name, agentName: params.agent ?? config.name, task: params.task,
@@ -351,5 +351,10 @@ export function spawnBg(
         finalOutput: `Spawned in background`,
       },
     };
+
+    // Emit initial update so the confirmation appears immediately in the UI
+    onUpdate?.(result);
+
+    return result;
   };
 }
