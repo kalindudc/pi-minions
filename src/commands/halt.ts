@@ -1,10 +1,11 @@
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { AgentTree } from "../tree.js";
 import { abortAgents } from "../tools/halt.js";
+import type { SubsessionManager } from "../subsessions/manager.js";
 
 export function createHaltHandler(
   tree: AgentTree,
-  handles: Map<string, AbortController>,
+  subsessionManager: SubsessionManager,
 ) {
   return async function handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
     const trimmed = args.trim();
@@ -20,7 +21,7 @@ export function createHaltHandler(
         ctx.ui.notify("No running minions to halt.", "info");
         return;
       }
-      const count = await abortAgents(running.map((n) => n.id), tree, handles);
+      const count = await abortAgents(running.map((n) => n.id), tree, subsessionManager);
       ctx.ui.notify(`Halted ${count} minion${count !== 1 ? "s" : ""}.`, "info");
       return;
     }
@@ -36,7 +37,7 @@ export function createHaltHandler(
       return;
     }
 
-    await abortAgents([node.id], tree, handles);
+    await abortAgents([node.id], tree, subsessionManager);
     ctx.ui.notify(`Halted ${node.name} (${node.id}).`, "info");
   };
 }

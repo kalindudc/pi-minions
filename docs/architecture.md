@@ -14,9 +14,10 @@ The extension is loaded via `pi -e ./src/index.ts` (development) or `pi install`
 graph LR
     index[index.ts<br/>entry point + registration]
 
-    index --> tree[tree.ts<br/>AgentTree — minion hierarchy]
+    index --> tree[tree.ts<br/>AgentTree — UI state + hierarchy]
+    index --> subsessions[subsessions/<br/>SubsessionManager — file-based sessions]
     index --> queue[queue.ts<br/>ResultQueue — background results]
-    index --> spawn_core[spawn.ts<br/>runMinionSession — session runner]
+    index --> spawn_core[spawn.ts<br/>runMinionSession — orchestrates sessions]
     index --> agents[agents.ts<br/>agent discovery + parsing]
     index --> minions_core[minions.ts<br/>names, IDs, default prompt]
     index --> render[render.ts<br/>TUI rendering]
@@ -36,19 +37,23 @@ graph LR
     tools_spawn --> minions_core
     tools_spawn --> tree
     tools_spawn --> queue
+    tools_spawn --> subsessions
 
     tools_halt --> tree
-    tools_agents --> agents
+    tools_halt --> subsessions
     tools_minions --> tree
+    tools_minions --> subsessions
     tools_minions --> queue
+    tools_agents --> agents
 ```
 
 | Module | Purpose |
 |--------|---------|
 | `index.ts` | Extension entry point — creates shared state, registers tools and commands, wires event listeners |
-| `tree.ts` | `AgentTree` — tracks all minions in a parent-child hierarchy with status, usage, and activity |
+| `tree.ts` | `AgentTree` — UI state (status, usage, activity, hierarchy) with change notifications |
+| `subsessions/` | `SubsessionManager` — file-based session lifecycle, metadata persistence, AgentSession access |
 | `queue.ts` | `ResultQueue` — holds completed background results for auto-delivery to the parent |
-| `spawn.ts` | `runMinionSession()` — creates in-process pi sessions with streaming, transcripts, and safety controls |
+| `spawn.ts` | `runMinionSession()` — orchestrates between AgentTree (UI) and SubsessionManager (sessions) |
 | `minions.ts` | Minion name pool, ID generation, default ephemeral prompt template |
 | `agents.ts` | Agent discovery from global and project directories, YAML frontmatter parsing |
 | `render.ts` | TUI rendering for spawn tool calls (progress bars, streaming output) and results |
@@ -163,14 +168,29 @@ Project-local agents override global agents on name collision. See [Agents](agen
 
 ## Design decisions
 
-### In-process sessions over child processes
+### File-based sessions
 
-pi-minions uses `createAgentSession()` from pi's SDK instead of `child_process.spawn()`:
+Minions are file-based pi sessions stored in `~/.pi/sessions/<cwd-hash>/minions/<id>.<name>.jsonl`:
 
-- **No process overhead** — minions are lightweight in-process sessions
-- **Typed streaming** — `session.subscribe()` provides structured events (tool starts, text deltas, turn ends)
-- **Clean abort** — `session.abort()` stops the session immediately
-- **Model registry access** — minions share the parent's `ctx.modelRegistry` for model resolution
+- **Persistence** — minion sessions survive extension reloads
+- **Parent tracking** — session metadata stores parent session path
+- **Audit trail** — full conversation history on disk
+- **Session switching** — pi's native `/session` can open minion sessions
+
+`SubsessionManager` creates sessions via pi's `SessionManager.create()` and tracks active `AgentSession` objects in memory for steer/halt operations.
+
+### AgentTree vs SubsessionManager
+
+We maintain two state managers with clear separation:
+
+| Concern | AgentTree | SubsessionManager |
+|---------|-----------|-------------------|
+| **Purpose** | UI state & hierarchy | Session lifecycle & persistence |
+| **Storage** | In-memory only | File-based with memory cache |
+| **Key methods** | `getRunning()`, `resolve()`, `onChange()` | `create()`, `getSession()`, `list()` |
+| **Used by** | Status/footer, dashboard, CLI commands | spawn.ts, steer/halt tools |
+
+`spawn.ts` is the **only** module that coordinates both — it creates the session via SubsessionManager, then wires callbacks to update AgentTree for UI notifications.
 
 ### Abort throws error
 

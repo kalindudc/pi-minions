@@ -1,6 +1,6 @@
 import type { ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
 import type { AgentTree } from "./tree.js";
-import type { DetachHandle } from "./tools/spawn.js";
+import type { SubsessionManager } from "./subsessions/manager.js";
 import { logger } from "./logger.js";
 
 export const MINIONS_STATUS_KEY = "minions-status";
@@ -22,7 +22,7 @@ export interface StatusTracker {
 
 export function createStatusTracker(
   tree: AgentTree,
-  detachHandles: Map<string, DetachHandle>,
+  subsessionManager: SubsessionManager,
 ): StatusTracker {
   let cachedUi: ExtensionContext["ui"] | null = null;
   let lastBgCount = -1;
@@ -129,15 +129,15 @@ export function createStatusTracker(
 
     const allRunning = tree.getRunning();
 
-    // Background: no detach handle = already in background
+    // Background: marked as detached = running in background
     const bgRunning = allRunning
-      .filter((n) => !detachHandles.has(n.id))
+      .filter((n) => n.detached)
       .map((n) => ({ id: n.id, name: n.name }));
     const bgCount = bgRunning.length;
 
-    // Foreground: has detach handle = can be detached to background
+    // Foreground: not marked as detached = can be detached
     const fgRunning = allRunning
-      .filter((n) => detachHandles.has(n.id))
+      .filter((n) => !n.detached)
       .map((n) => ({ id: n.id, name: n.name }));
     const fgCount = fgRunning.length;
 
@@ -152,7 +152,7 @@ export function createStatusTracker(
         fgTo: fgCount,
         hasTimer: !!hintRotationTimer,
         allRunning: allRunning.map((n) => `${n.name}(${n.id})`),
-        detachHandles: [...detachHandles.keys()],
+        bgMinions: bgRunning.map((n) => n.id),
       });
 
       lastBgCount = bgCount;

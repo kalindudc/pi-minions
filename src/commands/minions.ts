@@ -1,10 +1,10 @@
 import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import type { AgentTree } from "../tree.js";
 import type { ResultQueue } from "../queue.js";
-import type { MinionSession } from "../spawn.js";
-import type { DetachHandle } from "../tools/spawn.js";
 import { buildListMinionsText, buildShowMinionText, validateSteerTarget, executeSteering } from "../tools/minions.js";
+import { detachMinion } from "../tools/spawn.js";
 import { logger } from "../logger.js";
+import type { SubsessionManager } from "../subsessions/manager.js";
 
 type ParsedArgs =
   | { action: "list" }
@@ -43,9 +43,8 @@ export function parseMinionArgs(args: string): ParsedArgs {
 
 export function createMinionsHandler(
   tree: AgentTree,
-  detachHandles: Map<string, DetachHandle>,
   queue: ResultQueue,
-  sessions: Map<string, MinionSession>,
+  subsessionManager: SubsessionManager,
 ) {
   return async function handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
     const parsed = parseMinionArgs(args);
@@ -57,7 +56,7 @@ export function createMinionsHandler(
 
     // list, show, steer → always act immediately (instantaneous response)
     if (parsed.action === "list") {
-      const text = buildListMinionsText(tree, queue, detachHandles);
+      const text = buildListMinionsText(tree, queue, subsessionManager);
       ctx.ui.notify(text, "info");
       return;
     }
@@ -73,19 +72,18 @@ export function createMinionsHandler(
     }
 
     if (parsed.action === "steer") {
-      const validation = validateSteerTarget(tree, sessions, parsed.target);
-      if (!validation.success) {
+      const validation = validateSteerTarget(tree, subsessionManager, parsed.target);
+      if (validation.success === false) {
         ctx.ui.notify(validation.error, validation.errorType);
         return;
       }
 
-      const successMessage = await executeSteering(validation.node, validation.session, parsed.message);
+      const successMessage = await executeSteering(validation.node, validation.steer, parsed.message);
       ctx.ui.notify(successMessage, "info");
       return;
     }
 
-    // bg → must act directly because the parent is blocked by the foreground
-    // spawn tool. The spawn tool's detach path returns a visible result.
+    // bg → signals the foreground spawn to detach
     if (parsed.action === "bg") {
       logger.debug("minions:cmd", "bg", { target: parsed.target });
       const node = tree.resolve(parsed.target);
@@ -98,13 +96,16 @@ export function createMinionsHandler(
         ctx.ui.notify(`Minion ${node.name} (${node.id}) is not running (status: ${node.status}).`, "info");
         return;
       }
-      const handle = detachHandles.get(node.id);
-      if (!handle) {
+      
+      // Check if session exists (foreground) or just metadata (background)
+      const session = subsessionManager.getSession(node.id);
+      if (!session) {
         ctx.ui.notify(`Minion ${node.name} (${node.id}) is already running in background.`, "info");
         return;
       }
+
       logger.debug("minions:cmd", "bg-detaching", { id: node.id, name: node.name });
-      handle.resolve();
+      detachMinion(node.id);
       logger.debug("minions:cmd", "bg-detached", { id: node.id, name: node.name });
       ctx.ui.notify(`Sent ${node.name} (${node.id}) to background.`, "info");
       return;

@@ -38,7 +38,11 @@ Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, etc.
 - Flat `docs/` directory, no nesting
 - Documentation - each concept lives in exactly one file
 - Cross-reference between docs, never duplicate content
-- Do NOT mix Diátaxis quadrants in a single doc file
+- Do NOT mix quadrants in a single doc file
+
+## Testing
+
+Always load `/skill:test-writer` before writing or auditing tests and follow it's guidance
 
 ## Documentation
 

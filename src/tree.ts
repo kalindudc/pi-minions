@@ -121,6 +121,15 @@ export class AgentTree {
     if (node) node.lastActivity = activity;
   }
 
+  /** Mark a node as detached (moved to background) */
+  markDetached(id: string): void {
+    const node = this.nodes.get(id);
+    if (!node) return;
+
+    node.detached = true;
+    this.notify();
+  }
+
   remove(id: string): void {
     const node = this.nodes.get(id);
     if (!node) return;

@@ -1,8 +1,16 @@
+/**
+ * Behaviour-based tests for spawn / spawnBg tools.
+ *
+ * Strategy: mock runMinionSession (the LLM boundary) so tests stay fast and
+ * deterministic, but assert on observable system state — AgentTree status,
+ * queue contents, onUpdate stream, and returned tool results — not on
+ * implementation details like which internal functions were called.
+ */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { AgentTree } from "../../src/tree.js";
 import { ResultQueue } from "../../src/queue.js";
+import { SubsessionManager } from "../../src/subsessions/manager.js";
 
-// Mock the modules that make external calls
 vi.mock("../../src/agents.js", () => ({
   discoverAgents: vi.fn(),
 }));
@@ -12,8 +20,7 @@ vi.mock("../../src/spawn.js", () => ({
 
 import { discoverAgents } from "../../src/agents.js";
 import { runMinionSession } from "../../src/spawn.js";
-import { spawn, spawnBg } from "../../src/tools/spawn.js";
-import type { DetachHandle } from "../../src/tools/spawn.js";
+import { spawn, spawnBg, detachMinion } from "../../src/tools/spawn.js";
 import { emptyUsage } from "../../src/types.js";
 
 const mockAgent = {
@@ -24,18 +31,23 @@ const mockAgent = {
   filePath: "/tmp/scout.md",
 };
 
-function createCtx(cwd = "/tmp") {
-  return { cwd, modelRegistry: {}, model: undefined, ui: { setWorkingMessage: vi.fn() }, getSystemPrompt: () => "" } as any;
+function createCtx() {
+  return {
+    cwd: "/tmp",
+    modelRegistry: {},
+    model: undefined,
+    ui: { setWorkingMessage: vi.fn() },
+    getSystemPrompt: () => "",
+    sessionManager: { getSessionFile: vi.fn().mockReturnValue("/tmp/parent.jsonl") },
+  } as any;
 }
 
 function createDeps() {
   const tree = new AgentTree();
-  const handles = new Map<string, AbortController>();
-  const detachHandles = new Map<string, DetachHandle>();
   const queue = new ResultQueue();
-  const pi = { sendMessage: vi.fn(), sendUserMessage: vi.fn(), getThinkingLevel: vi.fn().mockReturnValue("off") } as any;
-  const sessions = new Map<string, any>();
-  return { tree, handles, detachHandles, queue, pi, sessions };
+  const pi = { sendUserMessage: vi.fn(), sendMessage: vi.fn() } as any;
+  const subsessionManager = new SubsessionManager("/tmp", "/tmp/parent.jsonl");
+  return { tree, queue, pi, subsessionManager };
 }
 
 beforeEach(() => {
@@ -43,7 +55,7 @@ beforeEach(() => {
   vi.mocked(runMinionSession).mockResolvedValue({
     exitCode: 0,
     finalOutput: "done",
-    usage: { ...emptyUsage(), input: 100, output: 20, turns: 1 },
+    usage: { ...emptyUsage(), turns: 1 },
   });
 });
 
@@ -51,109 +63,72 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("spawn", () => {
-  it("throws for unknown agent and message lists available agents", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
+// spawn (foreground)
 
-    await expect(
-      execute("tc-1", { agent: "unknown-agent", task: "do thing" }, undefined, undefined, createCtx()),
-    ).rejects.toThrow(/scout/);
-  });
-
-  it("adds node to tree with status running, then completed on success", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    await execute("tc-1", { agent: "scout", task: "find auth" }, undefined, undefined, createCtx());
-
-    const roots = tree.getRoots();
-    expect(roots).toHaveLength(1);
-    expect(roots[0]!.status).toBe("completed");
-    expect(roots[0]!.task).toBe("find auth");
-  });
-
-  it("sets node to failed and throws when session returns non-zero exit", async () => {
-    vi.mocked(runMinionSession).mockResolvedValue({ exitCode: 1, finalOutput: "", usage: emptyUsage(), error: "exit 1" });
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    await expect(
-      execute("tc-1", { agent: "scout", task: "fail" }, undefined, undefined, createCtx()),
-    ).rejects.toThrow();
-
-    expect(tree.getRoots()[0]!.status).toBe("failed");
-  });
-
-  it("passes modelRegistry and parentModel to runMinionSession", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-    const ctx = { cwd: "/tmp", modelRegistry: { find: vi.fn() }, model: { provider: "anthropic", id: "claude-haiku-4-5" }, ui: { setWorkingMessage: vi.fn() }, getSystemPrompt: () => "" } as any;
-
-    await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, ctx);
-
-    expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
-      expect.anything(),
-      "t",
-      expect.objectContaining({
-        modelRegistry: ctx.modelRegistry,
-        parentModel: ctx.model,
-        cwd: "/tmp",
-      }),
+describe("spawn — successful completion", () => {
+  it("tree node ends as completed after successful session", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc", { agent: "scout", task: "find auth" }, undefined, undefined, createCtx(),
     );
+    const node = tree.getRoots()[0]!;
+    expect(node.status).toBe("completed");
+    expect(node.task).toBe("find auth");
   });
 
-  it("returns final output with minion identity", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    const result = await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx());
-    const text = (result.content[0] as { type: "text"; text: string }).text;
+  it("result content contains final output and minion identity", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const result = await spawn(tree, queue, pi, subsessionManager)(
+      "tc", { agent: "scout", task: "t" }, undefined, undefined, createCtx(),
+    );
+    const text = (result.content[0] as any).text as string;
     expect(text).toContain("done");
     expect(text).toMatch(/Minion \w+ \(\w+\)/);
   });
 
-  it("spawns ephemeral agent when no agent param", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    const result = await execute(
-      "tc-1", { task: "do the thing" }, undefined, undefined, createCtx(),
+  it("final onUpdate has status=completed so sibling spinners re-render", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const statuses: string[] = [];
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc", { agent: "scout", task: "t" },
+      undefined,
+      (u: any) => { if (u.details?.status) statuses.push(u.details.status); },
+      createCtx(),
     );
+    // The last update must show the final status so that pi re-renders
+    // sibling tool banners immediately, not after the next spinner tick.
+    expect(statuses.at(-1)).toBe("completed");
+  });
 
+  it("ephemeral agent is used when no agent param", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc", { task: "do thing" }, undefined, undefined, createCtx(),
+    );
     expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
       expect.objectContaining({ source: "ephemeral" }),
-      "do the thing",
+      "do thing",
       expect.anything(),
     );
-    const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toContain("done");
-    expect(text).toMatch(/Minion \w+ \(\w+\)/);
   });
 
-  it("ephemeral agent applies model override", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    await execute(
-      "tc-1", { task: "t", model: "claude-haiku-4-5" }, undefined, undefined, createCtx(),
+  it("model override is forwarded to runMinionSession", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc", { task: "t", model: "claude-haiku-4-5" }, undefined, undefined, createCtx(),
     );
-
     expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "claude-haiku-4-5", source: "ephemeral" }),
+      expect.objectContaining({ model: "claude-haiku-4-5" }),
       "t",
       expect.anything(),
     );
   });
 
-  it("still discovers named agent when agent param provided", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    await execute(
-      "tc-1", { agent: "scout", task: "find auth" }, undefined, undefined, createCtx(),
+  it("named agent is resolved from discovery list", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc", { agent: "scout", task: "find auth" }, undefined, undefined, createCtx(),
     );
-
     expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
       expect.objectContaining({ name: "scout", source: "user" }),
       "find auth",
@@ -161,181 +136,214 @@ describe("spawn", () => {
     );
   });
 
-  it("cleans up handle after execution", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
+  it("throws listing available agents when unknown agent requested", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await expect(
+      spawn(tree, queue, pi, subsessionManager)(
+        "tc", { agent: "unknown", task: "t" }, undefined, undefined, createCtx(),
+      ),
+    ).rejects.toThrow(/scout/);
+  });
+});
 
-    await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx());
-
-    expect(handles.size).toBe(0);
+describe("spawn — failure", () => {
+  it("tree node ends as failed and spawn throws when session exits non-zero", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 1, finalOutput: "", usage: emptyUsage(), error: "oops",
+    });
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await expect(
+      spawn(tree, queue, pi, subsessionManager)(
+        "tc", { agent: "scout", task: "fail" }, undefined, undefined, createCtx(),
+      ),
+    ).rejects.toThrow();
+    expect(tree.getRoots()[0]!.status).toBe("failed");
   });
 
-  it("cleans up handle even on failure", async () => {
-    vi.mocked(runMinionSession).mockResolvedValue({ exitCode: 1, finalOutput: "", usage: emptyUsage(), error: "fail" });
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
+  it("final onUpdate has status=failed before the throw (sibling refresh)", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 1, finalOutput: "task failed", usage: emptyUsage(), error: "Command failed",
+    });
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const updates: any[] = [];
     await expect(
-      execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx()),
+      spawn(tree, queue, pi, subsessionManager)(
+        "tc", { agent: "scout", task: "t" },
+        undefined, (u: any) => updates.push(u), createCtx(),
+      ),
     ).rejects.toThrow();
 
-    expect(handles.size).toBe(0);
+    const last = updates.at(-1);
+    expect(last?.details?.status).toBe("failed");
+    expect(last?.details?.finalOutput).toBe("task failed");
   });
+});
 
-  it("spawn_bg returns immediately and minion stays running in tree", async () => {
-    let sessionResolve: (v: any) => void;
-    vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
-
-    const { tree, handles, queue, pi, sessions } = createDeps();
-    const execute = spawnBg(tree, handles, queue, pi, sessions);
-
-    const result = await execute(
-      "tc-1", { task: "bg task" }, undefined, undefined, createCtx(),
-    );
-
-    const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toContain("background");
-
-    const running = tree.getRunning();
-    expect(running).toHaveLength(1);
-    expect(running[0]!.task).toBe("bg task");
-
-    sessionResolve!({ exitCode: 0, finalOutput: "done", usage: { ...emptyUsage() } });
-    await new Promise((r) => setTimeout(r, 10));
-  });
-
-  it("spawn_bg calls onUpdate immediately with confirmation message", async () => {
-    let sessionResolve: (v: any) => void;
-    vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
-
-    const { tree, handles, queue, pi, sessions } = createDeps();
-    const execute = spawnBg(tree, handles, queue, pi, sessions);
-
-    const updates: any[] = [];
-    const onUpdate = (update: any) => {
-      updates.push(update);
-    };
-
-    const result = await execute(
-      "tc-1", { task: "bg task" }, undefined, onUpdate, createCtx(),
-    );
-
-    // onUpdate should have been called immediately before returning
-    expect(updates).toHaveLength(1);
-    expect(updates[0]!.details!.status).toBe("running");
-    expect(updates[0]!.details!.finalOutput).toBe("Spawned in background");
-
-    const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toContain("Spawned");
-    expect(text).toContain("background");
-
-    sessionResolve!({ exitCode: 0, finalOutput: "done", usage: { ...emptyUsage() } });
-    await new Promise((r) => setTimeout(r, 10));
-  });
-
-  it("foreground sets detachHandle before tree.add", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-
-    // Track when detachHandles is populated relative to tree.onChange
-    let hadDetachOnAdd = false;
-    tree.onChange(() => {
-      const running = tree.getRunning();
-      if (running.length > 0) {
-        hadDetachOnAdd = detachHandles.has(running[0]!.id);
-      }
+describe("spawn — halt (abort signal)", () => {
+  it("throws [HALTED] and emits final update when node is aborted during execution", async () => {
+    // Simulate what abortAgents does: marks the node aborted then session resolves exit 1.
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    vi.mocked(runMinionSession).mockImplementation(async (_config, _task, opts) => {
+      // Mimic the side-effect of abortAgents being called mid-run
+      tree.updateStatus(opts.id!, "aborted");
+      return { exitCode: 1, finalOutput: "halted", usage: emptyUsage() };
     });
 
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-    await execute("tc-1", { agent: "scout", task: "t" }, undefined, undefined, createCtx());
+    const updates: any[] = [];
+    await expect(
+      spawn(tree, queue, pi, subsessionManager)(
+        "tc", { agent: "scout", task: "t" },
+        undefined, (u: any) => updates.push(u), createCtx(),
+      ),
+    ).rejects.toThrow(/HALTED/);
 
-    // detachHandle was present when tree.onChange fired during add
-    expect(hadDetachOnAdd).toBe(true);
+    // The update MUST be emitted before the throw so siblings re-render immediately
+    const last = updates.at(-1);
+    expect(last?.details?.status).toBe("aborted");
+  });
+});
+
+describe("spawn — detach to background", () => {
+  it("spawn returns immediately when detachMinion is called mid-run", async () => {
+    let capturedId: string | undefined;
+    // Session never resolves on its own — it needs detachMinion to unblock spawn
+    vi.mocked(runMinionSession).mockImplementation(async (_config, _task, opts) => {
+      capturedId = opts.id;
+      return new Promise(() => {}); // deliberately never resolves
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const spawnPromise = spawn(tree, queue, pi, subsessionManager)(
+      "tc", { agent: "scout", task: "long task" }, undefined, undefined, createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10)); // let session start
+    expect(capturedId).toBeDefined();
+
+    // Detach unblocks spawn without aborting the underlying session
+    detachMinion(capturedId!);
+    const result = await spawnPromise;
+
+    expect(result.details?.status).toBe("running");
+    expect((result.content[0] as any).text).toContain("background");
   });
 
-  it("detach path returns immediately and keeps minion running", async () => {
-    // Session that hangs until we resolve it
-    let sessionResolve: (v: any) => void;
+  it("minion is marked detached after being sent to background", async () => {
+    let capturedId: string | undefined;
+    vi.mocked(runMinionSession).mockImplementation(async (_config, _task, opts) => {
+      capturedId = opts.id;
+      return new Promise(() => {});
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const spawnPromise = spawn(tree, queue, pi, subsessionManager)(
+      "tc", { agent: "scout", task: "t" }, undefined, undefined, createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(tree.get(capturedId!)?.detached).toBeFalsy(); // not yet detached
+
+    detachMinion(capturedId!);
+    await spawnPromise;
+
+    // Now it should be in the background
+    expect(tree.get(capturedId!)?.detached).toBe(true);
+    expect(tree.get(capturedId!)?.status).toBe("running"); // still running, not aborted
+  });
+
+  it("final onUpdate is emitted on detach so sibling banners refresh immediately", async () => {
+    let capturedId: string | undefined;
+    vi.mocked(runMinionSession).mockImplementation(async (_config, _task, opts) => {
+      capturedId = opts.id;
+      return new Promise(() => {});
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const updates: any[] = [];
+    const spawnPromise = spawn(tree, queue, pi, subsessionManager)(
+      "tc", { agent: "scout", task: "t" },
+      undefined, (u: any) => updates.push(u), createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    detachMinion(capturedId!);
+    await spawnPromise;
+
+    const last = updates.at(-1);
+    expect(last?.details?.finalOutput).toBe("Moved to background by user");
+  });
+});
+
+// spawnBg (fire-and-forget)
+
+describe("spawnBg", () => {
+  it("returns immediately while session is still running", async () => {
+    let sessionResolve!: (v: any) => void;
     vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
 
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const result = await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc", { task: "bg task" }, undefined, undefined, createCtx(),
+    );
 
-    // Start foreground spawn — will block on the session promise
-    const executePromise = execute("tc-1", { task: "long task" }, undefined, undefined, createCtx());
-
-    // The detach handle should be registered
-    expect(detachHandles.size).toBe(1);
-    const [minionId, handle] = [...detachHandles.entries()][0]!;
-
-    // Trigger detach
-    handle.resolve();
-
-    // Tool should return now
-    const result = await executePromise;
-    const text = (result.content[0] as { type: "text"; text: string }).text;
-    expect(text).toContain("USER ACTION");
-    expect(text).toContain("background");
-
-    // Minion still running in tree
+    // Returned immediately: minion still running in tree
     expect(tree.getRunning()).toHaveLength(1);
+    expect(tree.getRunning()[0]!.task).toBe("bg task");
+    expect((result.content[0] as any).text).toContain("background");
 
-    // Handle kept (minion still running) but detach handle cleaned up
-    expect(detachHandles.has(minionId)).toBe(false);
-    expect(handles.has(minionId)).toBe(true);
-
-    // Clean up
-    sessionResolve!({ exitCode: 0, finalOutput: "done", usage: { ...emptyUsage() } });
+    sessionResolve({ exitCode: 0, finalOutput: "done", usage: emptyUsage() });
     await new Promise((r) => setTimeout(r, 10));
   });
 
-  it("emits a final onUpdate with completed status before the tool resolves", async () => {
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    const updates: string[] = [];
-    const onUpdate = (update: any) => {
-      if (update.details?.status) updates.push(update.details.status);
-    };
-
-    await execute("tc-1", { agent: "scout", task: "do thing" }, undefined, onUpdate as any, createCtx());
-
-    expect(updates.length).toBeGreaterThan(0);
-    expect(updates.at(-1)).toBe("completed");
-  });
-
-  it("detach path queues result and auto-delivers when session completes", async () => {
-    let sessionResolve: (v: any) => void;
+  it("minion is marked detached immediately so status tracker counts it as background", async () => {
+    let sessionResolve!: (v: any) => void;
     vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
 
-    const { tree, handles, detachHandles, queue, pi, sessions } = createDeps();
-    const execute = spawn(tree, handles, detachHandles, queue, pi, sessions);
-
-    const executePromise = execute("tc-1", { task: "detach task" }, undefined, undefined, createCtx());
-
-    // Detach
-    const handle = [...detachHandles.values()][0]!;
-    handle.resolve();
-    await executePromise;
-
-    // Session completes after detach
-    sessionResolve!({ exitCode: 0, finalOutput: "result output", usage: { ...emptyUsage(), turns: 3 } });
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Result was queued and auto-accepted (deleted from queue after delivery)
-    expect(queue.getPending()).toHaveLength(0);
-    expect(queue.get(tree.getRoots()[0]!.id)).toBeUndefined();
-
-    // Auto-delivered to parent
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(
-      expect.stringContaining("result output"),
-      expect.objectContaining({ deliverAs: "followUp" }),
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc", { task: "bg task" }, undefined, undefined, createCtx(),
     );
 
-    // Tree updated to completed
-    const roots = tree.getRoots();
-    expect(roots[0]!.status).toBe("completed");
+    // The critical invariant: background minions must never look like foreground
+    // to the status tracker, otherwise the parent session UI blocks.
+    const minion = tree.getRunning()[0]!;
+    expect(minion.detached).toBe(true);
 
-    // Handle cleaned up
-    expect(handles.size).toBe(0);
+    sessionResolve({ exitCode: 0, finalOutput: "done", usage: emptyUsage() });
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("multiple spawnBg calls all produce background minions", async () => {
+    vi.mocked(runMinionSession).mockReturnValue(new Promise(() => {}));
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const execute = spawnBg(tree, queue, pi, subsessionManager);
+    await execute("tc-1", { task: "t1" }, undefined, undefined, createCtx());
+    await execute("tc-2", { task: "t2" }, undefined, undefined, createCtx());
+    await execute("tc-3", { task: "t3" }, undefined, undefined, createCtx());
+
+    const running = tree.getRunning();
+    expect(running).toHaveLength(3);
+    expect(running.every((n) => n.detached)).toBe(true);
+    expect(running.filter((n) => !n.detached)).toHaveLength(0); // zero foreground
+  });
+
+  it("onUpdate is called once immediately with running/background status", async () => {
+    let sessionResolve!: (v: any) => void;
+    vi.mocked(runMinionSession).mockReturnValue(new Promise((r) => { sessionResolve = r; }));
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const updates: any[] = [];
+
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc", { task: "bg task" }, undefined, (u: any) => updates.push(u), createCtx(),
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0].details?.status).toBe("running");
+    expect(updates[0].details?.finalOutput).toBe("Spawned in background");
+
+    sessionResolve({ exitCode: 0, finalOutput: "done", usage: emptyUsage() });
+    await new Promise((r) => setTimeout(r, 10));
   });
 });

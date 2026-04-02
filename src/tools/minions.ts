@@ -3,10 +3,9 @@ import type { Static } from "@sinclair/typebox";
 import type { AgentToolResult, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AgentTree } from "../tree.js";
 import type { ResultQueue } from "../queue.js";
-import type { MinionSession } from "../spawn.js";
 import type { AgentNode } from "../types.js";
 import { formatDuration, formatUsage } from "../render.js";
-import type { DetachHandle } from "./spawn.js";
+import type { SubsessionManager } from "../subsessions/manager.js";
 
 // Shared validation helpers
 
@@ -15,14 +14,14 @@ import type { DetachHandle } from "./spawn.js";
  */
 export type SteerValidationResult =
   | { success: false; error: string; errorType: "error" | "info" }
-  | { success: true; node: AgentNode; session: MinionSession };
+  | { success: true; node: AgentNode; steer: (text: string) => Promise<void> };
 
 /**
- * Validates that a target can be steered and returns the node/session or error details
+ * Validates that a target can be steered and returns the node/steer function or error details
  */
 export function validateSteerTarget(
   tree: AgentTree,
-  sessions: Map<string, MinionSession>,
+  subsessionManager: SubsessionManager,
   target: string
 ): SteerValidationResult {
   const node = tree.resolve(target);
@@ -42,7 +41,7 @@ export function validateSteerTarget(
     };
   }
 
-  const session = sessions.get(node.id);
+  const session = subsessionManager.getSession(node.id);
   if (!session) {
     return {
       success: false,
@@ -51,7 +50,7 @@ export function validateSteerTarget(
     };
   }
 
-  return { success: true, node, session };
+  return { success: true, node, steer: (text) => session.steer(text) };
 }
 
 /**
@@ -59,7 +58,7 @@ export function validateSteerTarget(
  */
 export async function executeSteering(
   node: AgentNode,
-  session: MinionSession,
+  steer: (text: string) => Promise<void>,
   message: string
 ): Promise<string> {
   const wrappedMessage =
@@ -69,13 +68,13 @@ export async function executeSteering(
     `When you deliver your final output, include results from both your original task AND this steer directive.\n` +
     `Explicitly note that you received a user steer and include the steer task verbatim.\n\n` +
     `User's steer message: ${message}`;
-  await session.steer(wrappedMessage);
+  await steer(wrappedMessage);
   return `Steered ${node.name} (${node.id}): ${message}`;
 }
 
 // list_minions
 
-export function buildListMinionsText(tree: AgentTree, queue: ResultQueue, detachHandles: Map<string, DetachHandle>): string {
+export function buildListMinionsText(tree: AgentTree, queue: ResultQueue, subsessionManager: SubsessionManager): string {
   const running = tree.getRunning();
   const pending = queue.getPending();
 
@@ -87,8 +86,8 @@ export function buildListMinionsText(tree: AgentTree, queue: ResultQueue, detach
   if (running.length) {
     lines.push(`Running (${running.length}):`);
     for (const n of running) {
-      // Detach handle exists = foreground (handle is what enables sending to background)
-      const mode = detachHandles.has(n.id) ? "foreground" : "background";
+      // Use the detached flag to determine mode - detached minions are background
+      const mode = n.detached ? "background" : "foreground";
       const activity = n.lastActivity ?? n.task.slice(0, 60);
       lines.push(`  ${n.name} (${n.id}) [${mode}] — ${activity}`);
     }
@@ -108,7 +107,7 @@ export type ListMinionsParams = Static<typeof ListMinionsParams>;
 export function listMinions(
   tree: AgentTree,
   queue: ResultQueue,
-  detachHandles: Map<string, DetachHandle>,
+  subsessionManager: SubsessionManager,
 ) {
   return async function execute(
     _toolCallId: string,
@@ -117,7 +116,7 @@ export function listMinions(
     _onUpdate: unknown,
     _ctx: ExtensionContext,
   ): Promise<AgentToolResult<unknown>> {
-    const text = buildListMinionsText(tree, queue, detachHandles);
+    const text = buildListMinionsText(tree, queue, subsessionManager);
     return { content: [{ type: "text", text }], details: undefined };
   };
 }
@@ -132,7 +131,7 @@ export type SteerMinionParams = Static<typeof SteerMinionParams>;
 
 export function steerMinion(
   tree: AgentTree,
-  sessions: Map<string, MinionSession>,
+  subsessionManager: SubsessionManager,
 ) {
   return async function execute(
     _toolCallId: string,
@@ -141,12 +140,12 @@ export function steerMinion(
     _onUpdate: unknown,
     _ctx: ExtensionContext,
   ): Promise<AgentToolResult<unknown>> {
-    const validation = validateSteerTarget(tree, sessions, params.target);
+    const validation = validateSteerTarget(tree, subsessionManager, params.target);
     if (!validation.success) {
       throw new Error(validation.error);
     }
 
-    const successMessage = await executeSteering(validation.node, validation.session, params.message);
+    const successMessage = await executeSteering(validation.node, validation.steer, params.message);
     return {
       content: [{ type: "text", text: successMessage }],
       details: undefined,

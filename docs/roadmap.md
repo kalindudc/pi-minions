@@ -21,6 +21,7 @@
 - [ ] bug when the parent uses the halt tool, the aborted minion still sends back a user message, this is wasteful
 - [ ] add `/minions version` command to quickly see the running extension version
 - [ ] bring background minions to foreground with queue
+- [ ] bug: do not send a user message for background minion result, the LLM thinks it is from the user and evaluates as a user message which can lead to confusion
 
 ### observability
 - [x] simple widget to see background minion count

@@ -52,6 +52,8 @@ export interface AgentNode {
   error?: string;
   /** Live activity line, e.g. "→ $ grep -r TODO src/" */
   lastActivity?: string;
+  /** True if moved to background (detached from foreground) */
+  detached?: boolean;
 }
 
 export interface QueuedResult {

@@ -1,37 +1,59 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { AgentTree } from "../../src/tree.js";
+import { SubsessionManager } from "../../src/subsessions/manager.js";
 import { createHaltHandler } from "../../src/commands/halt.js";
 
 function createCtx(notifyFn = vi.fn()) {
   return { ui: { notify: notifyFn }, cwd: "/tmp" } as any;
 }
 
+function createMockSubsessionManager(sessions: Map<string, any> = new Map()) {
+  return {
+    getSession: vi.fn().mockImplementation((id: string) => sessions.get(id)),
+    updateStatus: vi.fn(),
+  } as unknown as SubsessionManager;
+}
+
+function mockSession() {
+  return {
+    abort: vi.fn(),
+    steer: vi.fn().mockResolvedValue(undefined),
+    state: { messages: [] },
+    getSessionStats: vi.fn().mockReturnValue({
+      tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+      cost: 0.001,
+    }),
+  };
+}
+
 describe("createHaltHandler", () => {
   let tree: AgentTree;
-  let handles: Map<string, AbortController>;
+  let sessions: Map<string, any>;
+  let subsessionManager: SubsessionManager;
 
   beforeEach(() => {
     tree = new AgentTree();
-    handles = new Map();
+    sessions = new Map();
+    subsessionManager = createMockSubsessionManager(sessions);
   });
 
   it("shows usage error when args is empty", async () => {
     const notify = vi.fn();
-    const handler = createHaltHandler(tree, handles);
+    const handler = createHaltHandler(tree, subsessionManager);
     await handler("", createCtx(notify));
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Usage"), "error");
   });
 
   it("shows usage error when args is whitespace", async () => {
     const notify = vi.fn();
-    const handler = createHaltHandler(tree, handles);
+    const handler = createHaltHandler(tree, subsessionManager);
     await handler("   ", createCtx(notify));
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Usage"), "error");
   });
 
   it("notifies 'No running minions' when 'all' and none running", async () => {
     const notify = vi.fn();
-    const handler = createHaltHandler(tree, handles);
+    const handler = createHaltHandler(tree, subsessionManager);
     await handler("all", createCtx(notify));
     expect(notify).toHaveBeenCalledWith(expect.stringMatching(/[Nn]o.*minion/), "info");
   });
@@ -39,10 +61,10 @@ describe("createHaltHandler", () => {
   it("halts all running agents when 'all'", async () => {
     tree.add("a", "bob", "t1");
     tree.add("b", "kevin", "t2");
-    handles.set("a", new AbortController());
-    handles.set("b", new AbortController());
+    sessions.set("a", mockSession());
+    sessions.set("b", mockSession());
     const notify = vi.fn();
-    const handler = createHaltHandler(tree, handles);
+    const handler = createHaltHandler(tree, subsessionManager);
 
     await handler("all", createCtx(notify));
 
@@ -53,9 +75,9 @@ describe("createHaltHandler", () => {
 
   it("halts specific agent by id", async () => {
     tree.add("abc123", "bob", "task");
-    handles.set("abc123", new AbortController());
+    sessions.set("abc123", mockSession());
     const notify = vi.fn();
-    const handler = createHaltHandler(tree, handles);
+    const handler = createHaltHandler(tree, subsessionManager);
 
     await handler("abc123", createCtx(notify));
 
@@ -65,7 +87,7 @@ describe("createHaltHandler", () => {
 
   it("shows error for unknown id", async () => {
     const notify = vi.fn();
-    const handler = createHaltHandler(tree, handles);
+    const handler = createHaltHandler(tree, subsessionManager);
     await handler("notreal", createCtx(notify));
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("notreal"), "error");
   });
@@ -74,7 +96,7 @@ describe("createHaltHandler", () => {
     tree.add("done1", "bob", "task");
     tree.updateStatus("done1", "completed", 0);
     const notify = vi.fn();
-    const handler = createHaltHandler(tree, handles);
+    const handler = createHaltHandler(tree, subsessionManager);
 
     await handler("done1", createCtx(notify));
 

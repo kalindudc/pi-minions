@@ -4,6 +4,7 @@ import type { AgentToolResult } from "@mariozechner/pi-coding-agent";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { AgentTree } from "../tree.js";
 import { logger } from "../logger.js";
+import type { SubsessionManager } from "../subsessions/manager.js";
 
 export const HaltToolParams = Type.Object({
   id: Type.String({ description: "Agent ID or minion name to halt, or 'all' to halt all running minions" }),
@@ -14,17 +15,16 @@ export type HaltToolParams = Static<typeof HaltToolParams>;
 export async function abortAgents(
   ids: string[],
   tree: AgentTree,
-  handles: Map<string, AbortController>,
+  subsessionManager: SubsessionManager,
 ): Promise<number> {
   let count = 0;
   for (const id of ids) {
-    const controller = handles.get(id);
-    logger.debug("halt", "aborting", { id, hasController: controller !== undefined });
-    if (controller) {
-      controller.abort();
+    const session = subsessionManager.getSession(id);
+    logger.debug("halt", "aborting", { id, hasSession: session !== undefined });
+    if (session) {
+      session.abort();
     }
     tree.updateStatus(id, "aborted");
-    handles.delete(id);
     count++;
   }
   return count;
@@ -32,13 +32,13 @@ export async function abortAgents(
 
 export function halt(
   tree: AgentTree,
-  handles: Map<string, AbortController>,
+  subsessionManager: SubsessionManager,
 ) {
   return async function execute(
     _toolCallId: string,
     params: HaltToolParams,
     _signal: AbortSignal | undefined,
-    _onUpdate: undefined,
+    _onUpdate: unknown,
     _ctx: ExtensionContext,
   ): Promise<AgentToolResult<Record<string, never>>> {
     if (params.id === "all") {
@@ -46,7 +46,7 @@ export function halt(
       if (running.length === 0) {
         return { content: [{ type: "text", text: "No running minions to halt." }], details: {} };
       }
-      const count = await abortAgents(running.map((n) => n.id), tree, handles);
+      const count = await abortAgents(running.map((n) => n.id), tree, subsessionManager);
       return { content: [{ type: "text", text: `Halted ${count} minion${count !== 1 ? "s" : ""}.` }], details: {} };
     }
 
@@ -62,7 +62,7 @@ export function halt(
       };
     }
 
-    await abortAgents([node.id], tree, handles);
+    await abortAgents([node.id], tree, subsessionManager);
     return { content: [{ type: "text", text: `Halted minion ${node.name} (${node.id}).` }], details: {} };
   };
 }

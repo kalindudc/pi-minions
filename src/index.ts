@@ -3,8 +3,6 @@ import type { Model } from "@mariozechner/pi-ai";
 import { AgentTree } from "./tree.js";
 import { ResultQueue } from "./queue.js";
 import { SpawnToolParams, SpawnBgToolParams, spawn, spawnBg } from "./tools/spawn.js";
-import type { DetachHandle } from "./tools/spawn.js";
-import type { MinionSession } from "./spawn.js";
 import { HaltToolParams, halt } from "./tools/halt.js";
 import { ListAgentsParams, listAgents } from "./tools/list-agents.js";
 import {
@@ -19,16 +17,17 @@ import { renderCall, renderResult } from "./render.js";
 import { buildFooterFactory } from "./footer.js";
 import { createStatusTracker, MINIONS_STATUS_KEY } from "./status.js";
 import { logger, LOG_FILE } from "./logger.js";
+import { SubsessionManager } from "./subsessions/manager.js";
+import { getTempSessionPath } from "./subsessions/paths.js";
 
 export default function (pi: ExtensionAPI): void {
   logger.debug("extension", "loaded", { logFile: LOG_FILE });
 
-  // Shared state across all minion lifecycle, sessions, and abort controllers
+  // Core state
   const tree = new AgentTree();
-  const handles = new Map<string, AbortController>();
   const queue = new ResultQueue();
-  const detachHandles = new Map<string, DetachHandle>();
-  const sessions = new Map<string, MinionSession>();
+  // SubsessionManager is initialized in session_start event
+  let subsessionManager: SubsessionManager | undefined;
 
   pi.registerTool({
     name: "spawn",
@@ -37,7 +36,7 @@ export default function (pi: ExtensionAPI): void {
       "Delegate a task to a named agent or an ephemeral minion with isolated context. " +
       "If no agent name is provided, spawns an ephemeral minion with default capabilities. " +
       "Agents are discovered from ~/.pi/agent/agents/ and .pi/agents/. " +
-      "The agent runs as an in-process session with its own context window.",
+      "The agent runs as a file-based session with parent tracking.",
     promptSnippet: "Spawn a minion for isolated task delegation",
     promptGuidelines: [
       "Use spawn for \"foreground\" task delegation. The tool blocks until the minion completes and returns its result.",
@@ -49,7 +48,10 @@ export default function (pi: ExtensionAPI): void {
       "When a spawn result says [HALTED], the user intentionally stopped the minion. Do NOT retry, re-spawn, or ask about it. Acknowledge and move on.",
     ],
     parameters: SpawnToolParams,
-    execute: spawn(tree, handles, detachHandles, queue, pi, sessions),
+    execute: (...args) => {
+      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      return spawn(tree, queue, pi, subsessionManager)(...args);
+    },
     renderCall,
     renderResult,
   });
@@ -68,7 +70,10 @@ export default function (pi: ExtensionAPI): void {
       "For results you need before proceeding, use spawn (foreground) instead.",
     ],
     parameters: SpawnBgToolParams,
-    execute: spawnBg(tree, handles, queue, pi, sessions),
+    execute: (...args) => {
+      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      return spawnBg(tree, queue, pi, subsessionManager)(...args);
+    },
   });
 
   pi.registerTool({
@@ -86,7 +91,10 @@ export default function (pi: ExtensionAPI): void {
     description:
       "Abort a running minion by ID. Use id='all' to halt all running minions.",
     parameters: HaltToolParams,
-    execute: halt(tree, handles),
+    execute: (...args) => {
+      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      return halt(tree, subsessionManager)(...args);
+    },
   });
 
   pi.registerTool({
@@ -95,7 +103,10 @@ export default function (pi: ExtensionAPI): void {
     description: "List all running and pending minions with their status and current activity.",
     promptSnippet: "Check on running minions",
     parameters: ListMinionsParams,
-    execute: listMinions(tree, queue, detachHandles),
+    execute: (...args) => {
+      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      return listMinions(tree, queue, subsessionManager)(...args);
+    },
   });
 
   pi.registerTool({
@@ -112,7 +123,10 @@ export default function (pi: ExtensionAPI): void {
     description: "Send a steering message to a running minion. The message is injected into the minion's context before its next LLM call.",
     promptSnippet: "Redirect a running minion with new instructions",
     parameters: SteerMinionParams,
-    execute: steerMinion(tree, sessions),
+    execute: (...args) => {
+      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      return steerMinion(tree, subsessionManager)(...args);
+    },
   });
 
   pi.registerCommand("spawn", {
@@ -122,59 +136,55 @@ export default function (pi: ExtensionAPI): void {
 
   pi.registerCommand("minions", {
     description: "Manage minions: /minions [list|show|bg|steer] [id|name] [message]",
-    handler: createMinionsHandler(tree, detachHandles, queue, sessions),
+    handler: (args, ctx) => {
+      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      return createMinionsHandler(tree, queue, subsessionManager)(args, ctx);
+    },
   });
 
   pi.registerCommand("halt", {
     description: "Halt minion(s): /halt <id | name | all>",
-    handler: createHaltHandler(tree, handles),
-  });
-
-  // Track model changes so we always know what model is active
-  pi.on("session_start", (_event, ctx) => {
-    logger.debug("session", "start", {
-      model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none",
-      cwd: ctx.cwd,
-    });
-  });
-
-  pi.on("model_select", (event, _ctx) => {
-    cachedModel = event.model;
-    logger.debug("session", "model_select", {
-      model: `${event.model.provider}/${event.model.id}`,
-      name: event.model.name,
-      source: event.source,
-      previous: event.previousModel
-        ? `${event.previousModel.provider}/${event.previousModel.id}`
-        : "none",
-    });
+    handler: (args, ctx) => {
+      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      return createHaltHandler(tree, subsessionManager)(args, ctx);
+    },
   });
 
   // Minion status tracking (background and foreground)
-  const statusTracker = createStatusTracker(tree, detachHandles);
+  // Status tracker is initialized after subsessionManager in session_start
+  let statusTracker: ReturnType<typeof createStatusTracker> | undefined;
   let cachedUi: ExtensionContext["ui"] | null = null;
   let cachedCtx: ExtensionContext | null = null;
   let cachedModel: Model<any> | undefined;
 
-  // Event-driven: tree changes + tool boundaries trigger status refresh.
-  // tree.onChange catches: add (bg spawn), updateStatus (complete/fail/abort)
-  // tool_execution_end catches: detach (detachHandles changes, tree unchanged)
-  tree.onChange(() => statusTracker.refresh());
+  tree.onChange(() => statusTracker?.refresh());
   pi.on("tool_execution_end", (event) => {
     logger.debug("status", "tool_execution_end", { tool: event.toolName });
-    statusTracker.refresh();
+    statusTracker?.refresh();
   });
 
   pi.on("session_start", (_event, ctx) => {
     cachedCtx = ctx;
     cachedModel = ctx.model;
     cachedUi = ctx.ui;
+
+    // Create subsession manager for file-based minion sessions (always use file-based)
+    const parentSessionPath = ctx.sessionManager?.getSessionFile() ?? getTempSessionPath(ctx.cwd);
+    subsessionManager = new SubsessionManager(ctx.cwd, parentSessionPath);
+    logger.debug("session", "subsession-manager-created", {
+      cwd: ctx.cwd,
+      parentSession: parentSessionPath,
+      isTemp: !ctx.sessionManager?.getSessionFile(),
+    });
+
+    // Initialize status tracker now that we have subsessionManager
+    statusTracker = createStatusTracker(tree, subsessionManager);
     statusTracker.setUi(cachedUi);
-    
+
     // Clean up legacy status keys from previous versions
     cachedUi.setStatus("minions-bg", undefined);
     cachedUi.setStatus("minions-fg", undefined);
-    
+
     cachedUi.setFooter(buildFooterFactory({
       getCtx: () => cachedCtx,
       getModel: () => cachedModel,

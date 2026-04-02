@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { createStatusTracker, MINIONS_STATUS_KEY } from "../src/status.js";
 import { AgentTree } from "../src/tree.js";
-import type { DetachHandle } from "../src/tools/spawn.js";
+import { SubsessionManager } from "../src/subsessions/manager.js";
 
 // Minimal theme stub
 const theme = {
@@ -9,15 +9,24 @@ const theme = {
   bold: (text: string) => text,
 } as any;
 
+function createMockSubsessionManager() {
+  return {
+    getSession: vi.fn(),
+    updateStatus: vi.fn(),
+    list: vi.fn().mockReturnValue([]),
+    getMetadata: vi.fn(),
+  } as unknown as SubsessionManager;
+}
+
 describe("createStatusTracker", () => {
   let tree: AgentTree;
-  let detachHandles: Map<string, DetachHandle>;
+  let subsessionManager: SubsessionManager;
   let mockSetStatus: ReturnType<typeof vi.fn>;
   let mockUi: { setStatus: typeof mockSetStatus; theme: typeof theme };
 
   beforeEach(() => {
     tree = new AgentTree();
-    detachHandles = new Map();
+    subsessionManager = createMockSubsessionManager();
     mockSetStatus = vi.fn();
     mockUi = {
       setStatus: mockSetStatus,
@@ -32,12 +41,12 @@ describe("createStatusTracker", () => {
 
   describe("with no UI set", () => {
     it("does not throw when refresh is called without UI", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       expect(() => tracker.refresh()).not.toThrow();
     });
 
     it("does not call setStatus without UI", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.refresh();
       expect(mockSetStatus).not.toHaveBeenCalled();
     });
@@ -45,10 +54,11 @@ describe("createStatusTracker", () => {
 
   describe("status format", () => {
     it("shows [oo] bg: count format when minions exist", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("bg1", "bg-minion", "task");
+      tree.markDetached("bg1"); // Mark as background
       tracker.refresh();
 
       const lastCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
@@ -58,10 +68,11 @@ describe("createStatusTracker", () => {
     });
 
     it("includes hint after separator", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("bg1", "bg-minion", "task");
+      tree.markDetached("bg1"); // Mark as background
       tracker.refresh();
 
       const lastCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
@@ -70,7 +81,7 @@ describe("createStatusTracker", () => {
     });
 
     it("clears status when no minions", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tracker.refresh();
@@ -81,10 +92,11 @@ describe("createStatusTracker", () => {
 
   describe("hint rotation", () => {
     it("includes static hints when no foreground minions", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("bg1", "bg-minion", "task");
+      tree.markDetached("bg1"); // Mark as background
       tracker.refresh();
 
       const lastCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
@@ -92,11 +104,11 @@ describe("createStatusTracker", () => {
     });
 
     it("includes personalized hints for foreground minions", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("fg1", "my-agent", "task");
-      detachHandles.set("fg1", { resolve: vi.fn() });
+      // Not marked as detached = foreground (detached flag is what matters, not session presence)
       tracker.refresh();
 
       // Personalized hints are in the rotation - advance to see them
@@ -114,11 +126,11 @@ describe("createStatusTracker", () => {
     });
 
     it("rotates hints every 8 seconds when foreground minions exist", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("fg1", "agent1", "task");
-      detachHandles.set("fg1", { resolve: vi.fn() });
+      // Not marked as detached = foreground
       tracker.refresh();
 
       const firstHint = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1][1];
@@ -131,11 +143,11 @@ describe("createStatusTracker", () => {
     });
 
     it("stops rotation when no foreground minions remain", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("fg1", "agent1", "task");
-      detachHandles.set("fg1", { resolve: vi.fn() });
+      // Not marked as detached = foreground
       tracker.refresh();
 
       const initialCalls = mockSetStatus.mock.calls.length;
@@ -154,11 +166,13 @@ describe("createStatusTracker", () => {
 
   describe("background minions", () => {
     it("counts background minions correctly", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("bg1", "bg1", "task");
+      tree.markDetached("bg1");
       tree.add("bg2", "bg2", "task");
+      tree.markDetached("bg2");
       tracker.refresh();
 
       const lastCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
@@ -166,12 +180,13 @@ describe("createStatusTracker", () => {
     });
 
     it("does not count foreground minions as background", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("bg1", "bg1", "task");
+      tree.markDetached("bg1"); // Background
       tree.add("fg1", "fg1", "task");
-      detachHandles.set("fg1", { resolve: vi.fn() });
+      // Not marked as detached = foreground
       tracker.refresh();
 
       const lastCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
@@ -179,10 +194,11 @@ describe("createStatusTracker", () => {
     });
 
     it("updates count when background minion completes", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("bg1", "bg1", "task");
+      tree.markDetached("bg1");
       tracker.refresh();
 
       let lastCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
@@ -198,11 +214,11 @@ describe("createStatusTracker", () => {
 
   describe("foreground minions", () => {
     it("counts foreground minions for hint generation", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("fg1", "agent1", "task");
-      detachHandles.set("fg1", { resolve: vi.fn() });
+      // Not marked as detached = foreground
       tracker.refresh();
 
       // Advance through hints until we find the personalized one
@@ -219,13 +235,12 @@ describe("createStatusTracker", () => {
     });
 
     it("generates hints for multiple foreground minions", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("fg1", "agent1", "task");
       tree.add("fg2", "agent2", "task");
-      detachHandles.set("fg1", { resolve: vi.fn() });
-      detachHandles.set("fg2", { resolve: vi.fn() });
+      // Not marked as detached = foreground
       tracker.refresh();
 
       // Advance through hints until we find one with an agent name
@@ -246,9 +261,10 @@ describe("createStatusTracker", () => {
 
   describe("setUi", () => {
     it("allows updating the UI reference", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
 
       tree.add("bg1", "bg-minion", "task");
+      tree.markDetached("bg1");
       tracker.refresh();
       expect(mockSetStatus).not.toHaveBeenCalled();
 
@@ -261,11 +277,11 @@ describe("createStatusTracker", () => {
 
   describe("destroy", () => {
     it("stops hint rotation when destroyed", () => {
-      const tracker = createStatusTracker(tree, detachHandles);
+      const tracker = createStatusTracker(tree, subsessionManager);
       tracker.setUi(mockUi as any);
 
       tree.add("fg1", "agent1", "task");
-      detachHandles.set("fg1", { resolve: vi.fn() });
+      // Not marked as detached = foreground
       tracker.refresh();
 
       const initialCalls = mockSetStatus.mock.calls.length;

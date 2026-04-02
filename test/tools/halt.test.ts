@@ -1,69 +1,87 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { AgentTree } from "../../src/tree.js";
+import { SubsessionManager } from "../../src/subsessions/manager.js";
 import { halt, abortAgents } from "../../src/tools/halt.js";
 
 function createCtx() {
   return { cwd: "/tmp" } as any;
 }
 
-function mockController(): AbortController {
-  const controller = new AbortController();
-  vi.spyOn(controller, "abort");
-  return controller;
+function createMockSubsessionManager(sessions: Map<string, any> = new Map()) {
+  return {
+    getSession: vi.fn().mockImplementation((id: string) => sessions.get(id)),
+    updateStatus: vi.fn(),
+  } as unknown as SubsessionManager;
+}
+
+function mockSession() {
+  return {
+    abort: vi.fn(),
+    steer: vi.fn().mockResolvedValue(undefined),
+    state: { messages: [] },
+    getSessionStats: vi.fn().mockReturnValue({
+      tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+      cost: 0.001,
+    }),
+  };
 }
 
 describe("abortAgents", () => {
-  it("calls abort on controller and marks tree as aborted", async () => {
+  it("calls abort on session and marks tree as aborted", async () => {
     const tree = new AgentTree();
-    const handles = new Map<string, AbortController>();
+    const sessions = new Map<string, any>();
     tree.add("id1", "bob", "task");
-    const controller = mockController();
-    handles.set("id1", controller);
+    const session = mockSession();
+    sessions.set("id1", session);
+    const subsessionManager = createMockSubsessionManager(sessions);
 
-    await abortAgents(["id1"], tree, handles);
+    await abortAgents(["id1"], tree, subsessionManager);
 
-    expect(controller.abort).toHaveBeenCalled();
+    expect(session.abort).toHaveBeenCalled();
     expect(tree.get("id1")!.status).toBe("aborted");
-    expect(handles.has("id1")).toBe(false);
   });
 
-  it("still aborts tree node when no controller handle exists", async () => {
+  it("still aborts tree node when no session exists", async () => {
     const tree = new AgentTree();
-    const handles = new Map<string, AbortController>();
+    const sessions = new Map<string, any>();
     tree.add("id1", "bob", "task");
-    // No handle set
+    // No session set
+    const subsessionManager = createMockSubsessionManager(sessions);
 
-    await abortAgents(["id1"], tree, handles);
+    await abortAgents(["id1"], tree, subsessionManager);
 
     expect(tree.get("id1")!.status).toBe("aborted");
   });
 
   it("returns count of aborted agents", async () => {
     const tree = new AgentTree();
-    const handles = new Map<string, AbortController>();
+    const sessions = new Map<string, any>();
     tree.add("a", "bob", "t1");
     tree.add("b", "kevin", "t2");
-    handles.set("a", mockController());
-    handles.set("b", mockController());
+    sessions.set("a", mockSession());
+    sessions.set("b", mockSession());
+    const subsessionManager = createMockSubsessionManager(sessions);
 
-    const count = await abortAgents(["a", "b"], tree, handles);
+    const count = await abortAgents(["a", "b"], tree, subsessionManager);
     expect(count).toBe(2);
   });
 });
 
 describe("halt", () => {
   let tree: AgentTree;
-  let handles: Map<string, AbortController>;
+  let sessions: Map<string, any>;
+  let subsessionManager: SubsessionManager;
 
   beforeEach(() => {
     tree = new AgentTree();
-    handles = new Map();
+    sessions = new Map();
+    subsessionManager = createMockSubsessionManager(sessions);
   });
 
   it("halts a specific running agent by id", async () => {
     tree.add("id1", "bob", "task");
-    handles.set("id1", mockController());
-    const execute = halt(tree, handles);
+    sessions.set("id1", mockSession());
+    const execute = halt(tree, subsessionManager);
 
     const result = await execute("tc", { id: "id1" }, undefined, undefined, createCtx());
 
@@ -75,9 +93,9 @@ describe("halt", () => {
   it("halts all running agents when id is 'all'", async () => {
     tree.add("a", "bob", "t1");
     tree.add("b", "kevin", "t2");
-    handles.set("a", mockController());
-    handles.set("b", mockController());
-    const execute = halt(tree, handles);
+    sessions.set("a", mockSession());
+    sessions.set("b", mockSession());
+    const execute = halt(tree, subsessionManager);
 
     const result = await execute("tc", { id: "all" }, undefined, undefined, createCtx());
 
@@ -88,7 +106,7 @@ describe("halt", () => {
   });
 
   it("throws for unknown agent id", async () => {
-    const execute = halt(tree, handles);
+    const execute = halt(tree, subsessionManager);
 
     await expect(
       execute("tc", { id: "nope" }, undefined, undefined, createCtx()),
@@ -98,7 +116,7 @@ describe("halt", () => {
   it("returns info (not error) for already-completed agent", async () => {
     tree.add("id1", "bob", "task");
     tree.updateStatus("id1", "completed", 0);
-    const execute = halt(tree, handles);
+    const execute = halt(tree, subsessionManager);
 
     const result = await execute("tc", { id: "id1" }, undefined, undefined, createCtx());
 
@@ -107,7 +125,7 @@ describe("halt", () => {
   });
 
   it("returns info when 'all' but nothing is running", async () => {
-    const execute = halt(tree, handles);
+    const execute = halt(tree, subsessionManager);
 
     const result = await execute("tc", { id: "all" }, undefined, undefined, createCtx());
 

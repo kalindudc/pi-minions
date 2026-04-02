@@ -1,21 +1,16 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import {
-  createAgentSession,
-  DefaultResourceLoader,
-  SessionManager,
-  SettingsManager,
-  createCodingTools,
-} from "@mariozechner/pi-coding-agent";
-import type { LoadExtensionsResult } from "@mariozechner/pi-coding-agent";
-import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
 import type { Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
-import type { AgentConfig, SpawnResult, UsageStats } from "./types.js";
+import type { AgentConfig, SpawnResult } from "./types.js";
 import { emptyUsage } from "./types.js";
 import { logger } from "./logger.js";
+import { SubsessionManager } from "./subsessions/manager.js";
+import { getTempSessionPath } from "./subsessions/paths.js";
+import { generateId } from "./minions.js";
+import type { AgentTree } from "./tree.js";
 
-// Transcript logging
+// Transcript logging (transitional - should move to SubsessionManager)
 const TRANSCRIPT_DIR = join("/tmp", "logs", "pi-minions", "minions");
 
 function createTranscriptWriter(id: string, name: string, task: string) {
@@ -34,35 +29,7 @@ function createTranscriptWriter(id: string, name: string, task: string) {
   return { write, path };
 }
 
-/**
- * Extract the last assistant message text from a session's message history.
- * Messages can have content as a plain string or as an array of content blocks
- * (the Claude API format: [{type: "text", text: "..."}]).
- */
-function extractLastAssistantText(messages: unknown[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i] as Record<string, unknown> | undefined;
-    if (!msg || msg["role"] !== "assistant") continue;
-
-    const content = msg["content"];
-
-    // Plain string content
-    if (typeof content === "string") return content.trim();
-
-    // Content block array — join all text blocks
-    if (Array.isArray(content)) {
-      const text = content
-        .filter((b: any) => b.type === "text" && b.text)
-        .map((b: any) => b.text as string)
-        .join("");
-      if (text.trim()) return text.trim();
-    }
-  }
-
-  return "";
-}
-
-// Callbacks for streaming progress to the parent
+// Callbacks for streaming progress
 export interface MinionCallbacks {
   onToolActivity?: (activity: { type: "start" | "end"; toolName: string }) => void;
   onToolOutput?: (toolName: string, delta: string) => void;
@@ -70,12 +37,18 @@ export interface MinionCallbacks {
   onTurnEnd?: (turnCount: number) => void;
 }
 
-/** Minimal interface for external steer access to a running session. */
-export interface MinionSession {
-  steer(text: string): Promise<void>;
-}
-
-// In-process agent session runner
+/**
+ * Run a minion session.
+ *
+ * This function ORCHESTRATES between:
+ * - AgentTree: UI state updates (status, activity, usage)
+ * - SubsessionManager: Session lifecycle (create, steer, abort)
+ *
+ * All other modules should use ONE of these, not both.
+ *
+ * @param tree - UI state tracker (notifications, hierarchy)
+ * @param subsessionManager - Session lifecycle manager
+ */
 export async function runMinionSession(
   config: AgentConfig,
   task: string,
@@ -86,221 +59,263 @@ export async function runMinionSession(
     modelRegistry: ModelRegistry;
     parentModel?: Model<any>;
     cwd: string;
-    sessions?: Map<string, MinionSession>;
     parentSystemPrompt?: string;
+    subsessionManager?: SubsessionManager;
+    spawnedBy?: string;
+    parentSessionPath?: string;
+    tree?: AgentTree;
   } & MinionCallbacks,
 ): Promise<SpawnResult> {
-  const loader = new DefaultResourceLoader({
-    cwd: opts.cwd,
-    noExtensions: false,
-    noSkills: false,
-    noPromptTemplates: false,
-    noThemes: false,
-    systemPromptOverride: opts.parentSystemPrompt
-      ? () => opts.parentSystemPrompt!
-      : config.systemPrompt
-      ? () => config.systemPrompt
-      : undefined,
-    // Filter out pi-minions from child sessions to prevent infinite recursion —
-    // without this, a minion would re-register spawn tools and could spawn itself.
-    extensionsOverride: (base: LoadExtensionsResult) => ({
-      ...base,
-      extensions: base.extensions.filter(ext => !ext.resolvedPath.includes("pi-minions")),
-    }),
-  });
-  await loader.reload();
+  const id = opts.id ?? generateId();
+  const name = opts.name ?? config.name;
+  const spawnedBy = opts.spawnedBy ?? "unknown";
 
-  const effectiveSystemPrompt = opts.parentSystemPrompt ?? config.systemPrompt ?? "(default)";
+  // Get or create SubsessionManager
+  const subsessionManager = opts.subsessionManager ?? new SubsessionManager(
+    opts.cwd,
+    opts.parentSessionPath ?? getTempSessionPath(opts.cwd)
+  );
 
-  const { session } = await createAgentSession({
-    cwd: opts.cwd,
-    model: opts.parentModel,
-    tools: createCodingTools(opts.cwd),
-    sessionManager: SessionManager.inMemory(opts.cwd),
-    settingsManager: SettingsManager.create(),
-    modelRegistry: opts.modelRegistry,
-    resourceLoader: loader,
-  });
+  // Get AgentTree for UI updates (optional - can run without UI)
+  const tree = opts.tree;
 
-  const sessionId = opts.id ?? config.name;
-  if (opts.sessions) {
-    opts.sessions.set(sessionId, { steer: (text) => session.steer(text) });
-  }
+  logger.debug("spawn:session", "start", { id, name, agent: config.name, task });
 
-  // Wire abort signal — forward parent's AbortSignal to the session
-  let abortCleanup: (() => void) | undefined;
-  if (opts.signal) {
-    const onAbort = () => session.abort();
-    if (opts.signal.aborted) {
-      session.abort();
-    } else {
-      opts.signal.addEventListener("abort", onAbort, { once: true });
-      abortCleanup = () => opts.signal!.removeEventListener("abort", onAbort);
-    }
-  }
+  // Transitional: logging should move to SubsessionManager
+  const transcript = createTranscriptWriter(id, name, task);
+  transcript.write(`System Prompt: ${opts.parentSystemPrompt ?? config.systemPrompt ?? "(default)"}`);
+  transcript.write("---");
 
-  // Timeout: per-agent config overrides global env var
+  let turnCount = 0;
+  let finalOutput = "";
+  let completed = false;
+  let stepLimitReached = false;
+  let abortReason: string | undefined;
+  const usage = emptyUsage();
+
+  // Timeout handling
   const effectiveTimeout = config.timeout
     ?? (process.env["PI_MINIONS_TIMEOUT"] ? parseInt(process.env["PI_MINIONS_TIMEOUT"], 10) || undefined : undefined);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let graceTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
-  const transcriptId = opts.id ?? config.name;
-  const minionName = opts.name ?? config.name;
-  const transcript = createTranscriptWriter(transcriptId, minionName, task);
-  transcript.write(`System Prompt: ${effectiveSystemPrompt}`);
-  transcript.write("---");
-
-  let currentText = "";
-  let turnCount = 0;
-  const usage = emptyUsage();
-
-  // Step limit tracking
-  const steps = config.steps;
-  let stepLimitReached = false;
-  let abortReason: string | undefined;
-
-  // Tool output delta tracking — lastToolOutput holds cumulative text so we can extract only the new delta
-  let lastToolOutput = "";
-  let currentToolName = "";
-
-  const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "tool_execution_start") {
-      lastToolOutput = "";
-      currentToolName = event.toolName;
-      transcript.write(`\n[tool:start] ${event.toolName} ${JSON.stringify(event.args)}`);
-      opts.onToolActivity?.({ type: "start", toolName: event.toolName });
-    }
-
-    if (event.type === "tool_execution_end") {
-      transcript.write(`[tool:end] ${event.toolName}${event.isError ? " (ERROR)" : ""}`);
-      opts.onToolActivity?.({ type: "end", toolName: event.toolName });
-      currentToolName = "";
-      usage.turns = turnCount;
-    }
-
-    if (event.type === "tool_execution_update") {
-      // partialResult is cumulative — extract only the new portion since last update
-      const fullText: string = (event as any).partialResult?.content?.[0]?.text ?? "";
-      if (fullText.length > lastToolOutput.length) {
-        const delta = fullText.slice(lastToolOutput.length);
-        transcript.write(`[tool:output] ${delta.trimEnd()}`);
-        opts.onToolOutput?.(currentToolName, delta);
-      }
-      lastToolOutput = fullText;
-    }
-
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      currentText += event.assistantMessageEvent.delta;
-      opts.onTextDelta?.(event.assistantMessageEvent.delta, currentText);
-    }
-
-    if (event.type === "message_start") {
-      currentText = "";
-    }
-
-    if (event.type === "message_end") {
-      if (currentText.trim()) {
-        transcript.write(`\n[assistant]\n${currentText.trim()}`);
-      }
-    }
-
-    if (event.type === "turn_end") {
-      turnCount++;
-      transcript.write(`\n--- turn ${turnCount} ---`);
-      opts.onTurnEnd?.(turnCount);
-
-      // Step limit: steer at limit, allow 2 grace turns to wrap up, then force abort.
-      // If the minion finishes within the grace window, session.prompt() resolves
-      // naturally with abortReason unset → exitCode: 0 (graceful completion).
-      if (steps !== undefined && turnCount >= steps && !stepLimitReached) {
-        stepLimitReached = true;
-        transcript.write(`\n=== Step limit reached (${steps}) ===`);
-        logger.warn("spawn:session", "Step limit reached", { name: config.name, steps, turnCount });
-        session.steer(
-          "STEP LIMIT REACHED. You have used all allocated steps. " +
-          "Wrap up now — summarize your progress and deliver your findings. " +
-          "You have 2 more turns to finish."
-        ).catch(() => {});
-      } else if (stepLimitReached && turnCount > steps! + 2) {
-        abortReason = "Step limit exceeded — force abort after grace period";
-        logger.warn("spawn:session", "Force abort after grace period", { name: config.name, steps, turnCount });
-        session.abort();
-      }
-    }
-  });
-
   try {
-    if (effectiveTimeout !== undefined) {
-      timeoutId = setTimeout(() => {
-        transcript.write(`\n=== Timeout reached (${effectiveTimeout}ms) ===`);
-        logger.warn("spawn:session", "Timeout reached", { name: config.name, timeout: effectiveTimeout, turnCount });
-        session.steer(
-          "TIMEOUT REACHED. Your time allocation has expired. " +
-          "Summarize your progress and findings now. Do NOT make any more tool calls. " +
-          "This is your last turn."
-        ).catch(() => {});
+    // Create session via SubsessionManager
+    const completionPromise = new Promise<{ exitCode: number; output: string }>((resolve, reject) => {
+      subsessionManager.create({
+        id,
+        name,
+        task,
+        config,
+        spawnedBy,
+        cwd: opts.cwd,
+        modelRegistry: opts.modelRegistry,
+        parentModel: opts.parentModel,
+        parentSystemPrompt: opts.parentSystemPrompt,
+        signal: opts.signal,
 
-        // Grace period: 30s to wrap up before force abort
-        graceTimeoutId = setTimeout(() => {
-          abortReason = "Timeout exceeded \u2014 force abort after grace period";
-          logger.warn("spawn:session", "Force abort after timeout grace", { name: config.name, timeout: effectiveTimeout, turnCount });
-          session.abort();
-        }, 30_000);
-      }, effectiveTimeout);
-    }
+        // Wire callbacks to update BOTH systems
+        onToolActivity: (activity) => {
+          transcript.write(`\n[tool:${activity.type}] ${activity.toolName}`);
 
-    logger.debug("spawn:session", "start", {
-      name: config.name,
-      systemPrompt: effectiveSystemPrompt,
-      task: task,
+          // Update AgentTree for UI
+          if (activity.type === "start") {
+            tree?.updateActivity(id, `→ ${activity.toolName}`);
+          }
+
+          opts.onToolActivity?.(activity);
+        },
+
+        onToolOutput: (toolName, delta) => {
+          transcript.write(`[tool:output] ${delta.trimEnd()}`);
+          opts.onToolOutput?.(toolName, delta);
+        },
+
+        onTextDelta: (delta, fullText) => {
+          finalOutput = fullText;
+
+          // Update AgentTree activity
+          const preview = fullText.split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
+          tree?.updateActivity(id, preview);
+
+          opts.onTextDelta?.(delta, fullText);
+        },
+
+        onTurnEnd: (count) => {
+          turnCount = count;
+          transcript.write(`\n--- turn ${count} ---`);
+
+          // Update AgentTree
+          tree?.updateActivity(id, `turn ${count}`);
+
+          // Step limit enforcement
+          if (config.steps !== undefined && count >= config.steps && !stepLimitReached) {
+            stepLimitReached = true;
+            transcript.write(`\n=== Step limit reached (${config.steps}) ===`);
+            logger.warn("spawn:session", "Step limit reached", { name: config.name, steps: config.steps, turnCount: count });
+
+            const session = subsessionManager.getSession(id);
+            if (session) {
+              session.steer(
+                "STEP LIMIT REACHED. You have used all allocated steps. " +
+                "Wrap up now — summarize your progress and deliver your findings. " +
+                "You have 2 more turns to finish."
+              ).catch(() => {});
+            }
+          } else if (stepLimitReached && count > config.steps! + 2) {
+            abortReason = "Step limit exceeded — force abort after grace period";
+            logger.warn("spawn:session", "Force abort after grace period", { name: config.name, steps: config.steps, turnCount: count });
+            const session = subsessionManager.getSession(id);
+            if (session) {
+              session.abort();
+            }
+          }
+
+          opts.onTurnEnd?.(count);
+        },
+
+        onComplete: (result) => {
+          if (!completed) {
+            completed = true;
+
+            // Update AgentTree status
+            const status = result.exitCode === 0 ? "completed" : "failed";
+            tree?.updateStatus(id, status, result.exitCode);
+
+            resolve(result);
+          }
+        },
+      }).then((handle) => {
+        // Wire abort signal - abort always means halt (stop the session)
+        if (opts.signal) {
+          const onAbort = () => {
+            if (!completed) {
+              completed = true;
+              handle.abort();
+              tree?.updateStatus(id, "aborted");
+              resolve({ exitCode: 1, output: finalOutput });
+            }
+          };
+          if (opts.signal.aborted) {
+            onAbort();
+          } else {
+            opts.signal.addEventListener("abort", onAbort, { once: true });
+          }
+        }
+
+        // Set up timeout
+        if (effectiveTimeout !== undefined) {
+          timeoutId = setTimeout(() => {
+            transcript.write(`\n=== Timeout reached (${effectiveTimeout}ms) ===`);
+            logger.warn("spawn:session", "Timeout reached", { name: config.name, timeout: effectiveTimeout, turnCount });
+
+            handle.steer(
+              "TIMEOUT REACHED. Your time allocation has expired. " +
+              "Summarize your progress and findings now. Do NOT make any more tool calls. " +
+              "This is your last turn."
+            ).catch(() => {});
+
+            graceTimeoutId = setTimeout(() => {
+              transcript.write(`\n=== Force abort after grace period ===`);
+              logger.warn("spawn:session", "Force abort after timeout grace", { name: config.name, timeout: effectiveTimeout, turnCount });
+              handle.abort();
+              if (!completed) {
+                completed = true;
+                tree?.updateStatus(id, "aborted");
+                resolve({ exitCode: 1, output: finalOutput });
+              }
+            }, 30_000);
+          }, effectiveTimeout);
+        }
+      }).catch((err) => {
+        if (!completed) {
+          completed = true;
+          tree?.updateStatus(id, "failed", 1, err.message);
+          reject(err);
+        }
+      });
     });
-    await session.prompt(task);
 
-    // session.prompt() resolves normally even after abort,
-    // so check the signal and abortReason to distinguish abort from completion
-    if (opts.signal?.aborted || abortReason) {
-      const finalOutput = extractLastAssistantText(session.state.messages);
-      const error = abortReason ?? "Aborted";
-      transcript.write(`\n=== Aborted (${turnCount} turns): ${error} ===`);
-      logger.debug("spawn:session", "aborted", { name: config.name, turns: turnCount, reason: error });
-      return { exitCode: 1, finalOutput, usage, error };
-    }
+    const result = await completionPromise;
 
-    const finalOutput = extractLastAssistantText(session.state.messages);
-
-    try {
-      const stats = session.getSessionStats();
-      usage.input = stats.tokens.input;
-      usage.output = stats.tokens.output;
-      usage.cacheRead = stats.tokens.cacheRead;
-      usage.cacheWrite = stats.tokens.cacheWrite;
-      usage.cost = stats.cost;
-      usage.turns = turnCount;
-    } catch {
-      // Session stats may not be available
-    }
-
-    transcript.write(`\n=== Completed (${turnCount} turns) ===`);
-    transcript.write(`Output:\n${finalOutput}`);
-
-    logger.debug("spawn:session", "completed", { name: config.name, turns: turnCount, outputLen: finalOutput.length, transcript: transcript.path });
-
-    return { exitCode: 0, finalOutput, usage };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    transcript.write(`\n=== Error: ${msg} ===`);
-    logger.debug("spawn:session", "error", { name: config.name, error: msg });
-
-    return { exitCode: 1, finalOutput: currentText, usage, error: msg };
-  } finally {
+    // Cleanup
     if (timeoutId !== undefined) clearTimeout(timeoutId);
     if (graceTimeoutId !== undefined) clearTimeout(graceTimeoutId);
 
-    if (opts.sessions) opts.sessions.delete(sessionId);
+    // Check step limit abort
+    if (abortReason && result.exitCode === 0) {
+      return {
+        exitCode: 1,
+        finalOutput: result.output || finalOutput,
+        usage,
+        error: abortReason,
+      };
+    }
 
-    unsubscribe();
-    abortCleanup?.();
-    session.dispose();
+    // Get final stats
+    const session = subsessionManager.getSession(id);
+    if (session) {
+      try {
+        const stats = session.getSessionStats();
+        usage.input = stats.tokens.input;
+        usage.output = stats.tokens.output;
+        usage.cacheRead = stats.tokens.cacheRead;
+        usage.cacheWrite = stats.tokens.cacheWrite;
+        usage.cost = stats.cost;
+      } catch {
+        // Session stats may not be available
+      }
+    }
+
+    usage.turns = turnCount;
+
+    // Update final output from session if not captured
+    if (!finalOutput && session) {
+      finalOutput = extractLastAssistantText(session.state.messages);
+    }
+
+    transcript.write(`\n=== ${result.exitCode === 0 ? "Completed" : "Failed"} (${turnCount} turns) ===`);
+    transcript.write(`Output:\n${finalOutput}`);
+
+    logger.debug("spawn:session", result.exitCode === 0 ? "completed" : "failed", {
+      id, name, exitCode: result.exitCode, turns: turnCount
+    });
+
+    return {
+      exitCode: result.exitCode,
+      finalOutput: result.output || finalOutput,
+      usage,
+      error: result.exitCode !== 0 ? result.output || "Unknown error" : undefined
+    };
+  } catch (err) {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (graceTimeoutId !== undefined) clearTimeout(graceTimeoutId);
+
+    const msg = err instanceof Error ? err.message : String(err);
+    transcript.write(`\n=== Error: ${msg} ===`);
+    logger.debug("spawn:session", "error", { id, name, error: msg });
+
+    return { exitCode: 1, finalOutput, usage, error: msg };
   }
+}
+
+function extractLastAssistantText(messages: unknown[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as Record<string, unknown> | undefined;
+    if (!msg || msg["role"] !== "assistant") continue;
+
+    const content = msg["content"];
+
+    if (typeof content === "string") return content.trim();
+
+    if (Array.isArray(content)) {
+      const text = content
+        .filter((b: any) => b.type === "text" && b.text)
+        .map((b: any) => b.text as string)
+        .join("");
+      if (text.trim()) return text.trim();
+    }
+  }
+
+  return "";
 }

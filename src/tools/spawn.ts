@@ -4,7 +4,6 @@ import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-
 import type { ExtensionContext, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { discoverAgents } from "../agents.js";
 import { runMinionSession } from "../spawn.js";
-import type { MinionSession } from "../spawn.js";
 import { formatToolCall } from "../render.js";
 import { AgentTree } from "../tree.js";
 import { generateId, pickMinionName, defaultMinionTemplate } from "../minions.js";
@@ -12,6 +11,8 @@ import { logger } from "../logger.js";
 import type { ResultQueue } from "../queue.js";
 import type { AgentConfig, UsageStats } from "../types.js";
 import { emptyUsage } from "../types.js";
+import type { SubsessionManager } from "../subsessions/manager.js";
+import { EventBus } from "../subsessions/event-bus.js";
 
 // Parameter schemas
 const baseParams = {
@@ -42,10 +43,8 @@ export interface SpawnToolDetails {
   spinnerFrame?: number;
 }
 
-/** Stored in detachHandles so /minions bg can detach a foreground spawn. */
-export interface DetachHandle {
-  resolve: () => void;
-}
+/** Signal for detaching a foreground minion */
+export type DetachSignal = { id: string; resolve: () => void };
 
 // Config resolution
 function resolveConfig(
@@ -66,14 +65,13 @@ function resolveConfig(
   return defaultMinionTemplate(name, { model: params.model });
 }
 
-// Background activity callbacks (shared by spawn_bg and detach)
-function createBgCallbacks(tree: AgentTree, id: string) {
+// Activity callbacks for tree updates
+function createActivityCallbacks(tree: AgentTree, id: string) {
   return {
     onToolActivity: (activity: { type: "start" | "end"; toolName: string }) => {
       if (activity.type === "start") tree.updateActivity(id, `→ ${activity.toolName}`);
     },
     onToolOutput: (toolName: string, delta: string) => {
-      // Extract last non-empty line, truncate to 80 chars for activity preview
       const line = delta.trimEnd().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
       if (line) tree.updateActivity(id, `${toolName}: ${line}`);
     },
@@ -85,18 +83,16 @@ function createBgCallbacks(tree: AgentTree, id: string) {
   };
 }
 
-// Background completion handler (shared by spawn_bg and detach)
+// Handle background completion
 function handleBgCompletion(
   sessionPromise: Promise<import("../types.js").SpawnResult>,
   id: string, name: string, task: string, startTime: number,
-  tree: AgentTree, handles: Map<string, AbortController>,
-  queue: ResultQueue, pi: ExtensionAPI,
+  tree: AgentTree, queue: ResultQueue, pi: ExtensionAPI,
 ): void {
   void sessionPromise.then((result) => {
     const status = result.exitCode === 0 ? "completed" : "failed";
     tree.updateStatus(id, status, result.exitCode, result.error);
     tree.updateUsage(id, result.usage);
-    handles.delete(id);
 
     queue.add({
       id, name, task,
@@ -120,19 +116,47 @@ function handleBgCompletion(
   }).catch((err) => {
     const msg = err instanceof Error ? err.message : String(err);
     tree.updateStatus(id, "failed", 1, msg);
-    handles.delete(id);
     logger.error("spawn:tool", "bg-failed", { id, name, error: msg });
   });
+}
+
+// Create shared event bus for detach signals
+function createDetachBus() {
+  const bus = new EventBus();
+  return {
+    emit: (id: string) => bus.emit("detach", id),
+    on: (id: string, handler: () => void) => {
+      const unsubscribe = bus.on<string>("detach", (detachedId) => {
+        if (detachedId === id) handler();
+      });
+      return unsubscribe;
+    },
+  };
+}
+
+// Shared detach bus across all spawn calls
+const detachBus = createDetachBus();
+
+/** Check if a minion is foreground (can be detached) */
+export function isForeground(id: string, subsessionManager: SubsessionManager): boolean {
+  // A minion is foreground if it's running and we're actively waiting on it
+  // This is tracked by checking if the session exists and is running
+  const session = subsessionManager.getSession(id);
+  const metadata = subsessionManager.getMetadata(id);
+  return session !== undefined && metadata?.status === "running";
+}
+
+/** Detach a foreground minion */
+export function detachMinion(id: string): void {
+  detachBus.emit(id);
 }
 
 // Foreground spawn (blocks parent, streams progress)
 export function spawn(
   tree: AgentTree,
-  handles: Map<string, AbortController>,
-  detachHandles: Map<string, DetachHandle>,
   queue: ResultQueue,
   pi: ExtensionAPI,
-  sessions: Map<string, MinionSession>,
+  subsessionManager: SubsessionManager,
 ) {
   return async function execute(
     _toolCallId: string,
@@ -146,30 +170,9 @@ export function spawn(
     const config = resolveConfig(params, name, ctx.cwd);
     logger.info("spawn:tool", "start", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
 
-    const controller = new AbortController();
-    handles.set(id, controller);
-
-    // Detach handle: resolves when /minions bg is called, racing against session completion.
-    // Must be set up BEFORE tree.add so tree.onChange correctly filters this as foreground.
-    let detachResolve: (() => void) | undefined;
-    const detachPromise = new Promise<void>((resolve) => {
-      detachResolve = resolve;
-    });
-    detachHandles.set(id, { resolve: detachResolve! });
-
     tree.add(id, name, params.task);
 
-    let signalCleanup: (() => void) | undefined;
-    if (signal) {
-      const onAbort = () => controller.abort();
-      if (signal.aborted) {
-        controller.abort();
-      } else {
-        signal.addEventListener("abort", onAbort, { once: true });
-        signalCleanup = () => signal.removeEventListener("abort", onAbort);
-      }
-    }
-
+    // Track UI state
     let lastActivity: string | undefined;
     let lastOutput = "";
     let spinnerFrame = 0;
@@ -193,8 +196,34 @@ export function spawn(
       });
     };
 
-    const spinnerInterval = setInterval(() => { spinnerFrame++; emitUpdate(); }, 200);
+    const spinnerInterval = setInterval(() => { spinnerFrame++; emitUpdate(); }, 80);
+
+    // Create abort controller for this session
+    const controller = new AbortController();
+
+    // Wire parent's abort signal
+    if (signal) {
+      const onAbort = () => controller.abort();
+      if (signal.aborted) {
+        controller.abort();
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+
+    // Set up detach listener - uses separate mechanism from abort
     let detached = false;
+    let detachResolve: (() => void) | undefined;
+    const detachPromise = new Promise<void>((resolve) => {
+      detachResolve = resolve;
+    });
+    const unsubscribeDetach = detachBus.on(id, () => {
+      if (!detached) {
+        detached = true;
+        detachResolve?.();
+        // Note: We do NOT abort the controller here - the session continues running
+      }
+    });
 
     try {
       const sessionPromise = runMinionSession(config, params.task, {
@@ -203,8 +232,9 @@ export function spawn(
         modelRegistry: ctx.modelRegistry,
         parentModel: ctx.model,
         cwd: ctx.cwd,
-        sessions,
-        parentSystemPrompt: ctx.getSystemPrompt(),
+        subsessionManager,
+        spawnedBy: _toolCallId,
+        parentSessionPath: ctx.sessionManager?.getSessionFile() ?? undefined,
         onToolActivity: (activity) => {
           if (activity.type === "start") {
             const desc = formatToolCall(activity.toolName, {});
@@ -213,7 +243,6 @@ export function spawn(
           }
         },
         onToolOutput: (toolName, delta) => {
-          // Last non-empty line, truncated for preview
           const line = delta.trimEnd().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
           if (line) {
             emitUpdate({ activity: `${toolName}: ${line}` });
@@ -228,22 +257,25 @@ export function spawn(
         onTurnEnd: (turnCount) => {
           tree.updateActivity(id, `turn ${turnCount}`);
         },
+        // Activity callbacks are defined above inline
       });
 
-      const raceResult = await Promise.race([
-        sessionPromise.then((r) => ({ type: "completed" as const, result: r })),
-        detachPromise.then(() => ({ type: "detached" as const })),
+      // Wait for either session completion OR detach signal
+      const result = await Promise.race([
+        sessionPromise,
+        detachPromise.then(() => ({ exitCode: 0, finalOutput: "detached", usage: { ...emptyUsage() }, detached: true })),
       ]);
 
-      if (raceResult.type === "detached") {
-        detached = true;
-        signalCleanup?.();
-        signalCleanup = undefined;
-
-        const startTime = tree.get(id)?.startTime ?? Date.now();
-        handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, handles, queue, pi);
-
+      // If detached, set up background completion handling and return
+      if (detached || ('detached' in result && result.detached)) {
         logger.debug("spawn:tool", "detached", { id, name });
+        // Mark the minion as detached in the tree (updates foreground/background status)
+        tree.markDetached(id);
+        // Set up background completion handling
+        const startTime = tree.get(id)?.startTime ?? Date.now();
+        handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, queue, pi);
+        // Emit final update to refresh sibling minions' UI immediately
+        emitUpdate({ finalOutput: `Moved to background by user` });
         return {
           content: [{ type: "text", text: `[USER ACTION] The user moved minion ${name} (${id}) to background via /minions bg. The minion is still running and will deliver its result when complete. Continue with other tasks.` }],
           details: {
@@ -255,25 +287,21 @@ export function spawn(
         };
       }
 
-      const result = raceResult.result;
+      // Normal completion (completed, failed, or aborted)
       const currentNode = tree.get(id);
-
-      // Check tree node for "aborted" first — external /halt sets the tree status
-      // before session.prompt() resolves, so the result alone can't distinguish halt from error
       const status = currentNode?.status === "aborted"
         ? "aborted"
         : result.exitCode === 0 ? "completed" : "failed";
 
       if (status !== "aborted") {
         logger.info("spawn:tool", status, { id, exitCode: result.exitCode, outputLen: result.finalOutput.length });
-        tree.updateStatus(id, status, result.exitCode, result.error);
+        tree.updateStatus(id, status, result.exitCode, (result as any).error);
       }
 
       tree.updateUsage(id, result.usage);
 
-      // Emit a final update with the resolved status. Sibling spinners re-render
-      // this tool via onUpdate; renderResult checks details.status so the
-      // completion layout shows immediately without waiting for the sibling.
+      // ALWAYS emit final update to refresh sibling minions' UI immediately
+      // This must happen before returning or throwing so siblings re-render
       emitUpdate({ finalOutput: result.finalOutput });
 
       const node = tree.get(id);
@@ -288,7 +316,7 @@ export function spawn(
         throw new Error(`[HALTED] Minion ${name} (${id}) was stopped by the user. This is intentional — do NOT retry or re-spawn.`);
       }
       if (result.exitCode !== 0) {
-        throw new Error(`Minion ${name} (${id}) failed: ${result.error ?? `exited with code ${result.exitCode}`}`);
+        throw new Error(`Minion ${name} (${id}) failed: ${(result as any).error ?? `exited with code ${result.exitCode}`}`);
       }
 
       return {
@@ -297,9 +325,7 @@ export function spawn(
       };
     } finally {
       clearInterval(spinnerInterval);
-      detachHandles.delete(id);
-      signalCleanup?.();
-      if (!detached) handles.delete(id);
+      unsubscribeDetach();
     }
   };
 }
@@ -307,10 +333,9 @@ export function spawn(
 // Background spawn (fire-and-forget, returns immediately)
 export function spawnBg(
   tree: AgentTree,
-  handles: Map<string, AbortController>,
   queue: ResultQueue,
   pi: ExtensionAPI,
-  sessions: Map<string, MinionSession>,
+  subsessionManager: SubsessionManager,
 ) {
   return async function execute(
     _toolCallId: string,
@@ -324,23 +349,29 @@ export function spawnBg(
     const config = resolveConfig(params, name, ctx.cwd);
     logger.info("spawn:tool", "start-bg", { id, name, agent: params.agent ?? "ephemeral", task: params.task });
 
-    const controller = new AbortController();
-    handles.set(id, controller);
     tree.add(id, name, params.task);
+    // Mark as detached immediately since this is a background spawn
+    tree.markDetached(id);
 
+    const controller = new AbortController();
     const startTime = Date.now();
+
+    // Start the session without awaiting - truly fire-and-forget
+    // We use void to explicitly ignore the promise and prevent unhandled rejection warnings
     const sessionPromise = runMinionSession(config, params.task, {
       id, name,
       signal: controller.signal,
       modelRegistry: ctx.modelRegistry,
       parentModel: ctx.model,
       cwd: ctx.cwd,
-      sessions,
-      parentSystemPrompt: ctx.getSystemPrompt(),
-      ...createBgCallbacks(tree, id),
+      subsessionManager,
+      spawnedBy: _toolCallId,
+      parentSessionPath: ctx.sessionManager?.getSessionFile() ?? undefined,
+      ...createActivityCallbacks(tree, id),
     });
 
-    handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, handles, queue, pi);
+    // Set up completion handling but don't await the promise
+    handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, queue, pi);
 
     const result: AgentToolResult<SpawnToolDetails> = {
       content: [{ type: "text", text: `Spawned ${name} (${id}) in background. Results will be delivered when complete.` }],
@@ -352,9 +383,7 @@ export function spawnBg(
       },
     };
 
-    // Emit initial update so the confirmation appears immediately in the UI
     onUpdate?.(result);
-
     return result;
   };
 }
