@@ -1,0 +1,7 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`spawn rendering > renders spawn tool progress > spawn-progress 1`] = `
+[
+  "[spawn] Called with: {"task":"test"}",
+]
+`;
