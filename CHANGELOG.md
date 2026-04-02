@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-01
+
+- feat: file-based subsession foundation with persistent minion sessions — replaces in-process sessions with SubsessionManager-managed file-based sessions; minions now persist with parent references, separate detach/halt signals, and explicit foreground/background tracking
+- chore: update roadmap task completion status
+
 ## [0.5.2] - 2026-03-31
 
 - fix: memory leak in result queue, logger blocking IO, progress spinner churn, background minion tool call rendering
