@@ -4,10 +4,7 @@ Verify the pi-minions extension loaded and registered its tools.
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/e2e-results.json
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

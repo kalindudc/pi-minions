@@ -4,9 +4,7 @@ Verify that spawning without an agent name creates an ephemeral minion with defa
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

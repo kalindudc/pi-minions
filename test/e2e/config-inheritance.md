@@ -4,9 +4,7 @@ Verify that a minion inherits configuration from the parent session, specificall
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

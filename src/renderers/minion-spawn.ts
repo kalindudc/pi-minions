@@ -5,7 +5,13 @@ import type { SpawnToolDetails } from "../tools/spawn.js";
 import { logger } from "../logger.js";
 import { formatUsage } from "../render.js";
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER = [
+  '[oo]', '[oo]', '[oo]',
+  '[oo]', '[o-]', '[--]',
+  '[--]', '[-o]', '[oo]',
+  '[oo]'
+];
 
 export const minionSpawnRenderer: MessageRenderer<SpawnToolDetails> = (
   message,
@@ -45,7 +51,7 @@ export const minionSpawnRenderer: MessageRenderer<SpawnToolDetails> = (
   let header = `${theme.fg(statusColor, icon)} ${theme.fg(statusColor, data.name)}`;
   if (data.id) {
     header += ` ${theme.fg("dim", `(${data.id})`)}`;  }
-  
+
   // Add usage for completed/failed minions
   if (!isRunning && data.usage) {
     header += ` ${theme.fg("muted", formatUsage(data.usage, data.model))}`;
@@ -56,7 +62,7 @@ export const minionSpawnRenderer: MessageRenderer<SpawnToolDetails> = (
 
   // Activity line (if running)
   if (isRunning && data.activity) {
-    const activity = theme.fg("dim", `   ⎿  ${data.activity ?? "thinking…"}`);
+    const activity = theme.fg("dim", `  ╰  ${data.activity ?? "thinking…"}`);
     header += `\n${activity}`;
   }
 

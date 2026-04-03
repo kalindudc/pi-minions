@@ -4,9 +4,7 @@ Verify that the `steer_minion` tool injects a message into a running minion.
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

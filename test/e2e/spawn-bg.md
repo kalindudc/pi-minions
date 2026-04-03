@@ -4,9 +4,7 @@ Verify that `spawn_bg` returns immediately and the minion completes in the backg
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

@@ -31,6 +31,14 @@ tasks:
         npm install
         echo "  ✓ Dependencies installed"
       - |
+        ln -s $HOME/.pi/agent/sessions tmp/sessions
+        echo " "
+        echo "✓ session files can be found in ./tmp/sessions/"
+      - |
+        ln -s /tmp/logs/pi-minions tmp/logs
+        echo ""
+        echo "✓ debug logs can be found in ./tmp/logs/"
+      - |
         echo ""
         echo "✓ Development environment ready."
         echo ""
@@ -39,24 +47,33 @@ tasks:
         echo "  task dev         load extension into pi"
         echo "  task test:e2e    smoke test in pi print mode"
 
+  cleanup:
+    desc: "Clean up all logs and tmp test files"
+    env:
+      PI_MINIONS_DEBUG: "1"
+    cmds:
+      - |
+        rm -rf /tmp/logs/pi-minions/minions/*.log
+        rm -rf $HOME/.pi/agent/sessions/*tmp-pi-minions-test*
+
   dev:
     desc: "Load extension into pi. Open 'task logs' in a second terminal to see debug output."
     env:
       PI_MINIONS_DEBUG: "1"
     cmds:
-      - mkdir -p /tmp/logs
+      - mkdir -p /tmp/logs/pi-minions/
       # Rotate: keep last session as .prev so nothing is lost
       - |
-        if [ -s /tmp/logs/debug.log ]; then
-          cp /tmp/logs/debug.log /tmp/logs/debug.prev.log
+        if [ -s /tmp/logs/pi-minions/debug.log ]; then
+          cp /tmp/logs/pi-minions/debug.log /tmp/logs/pi-minions/debug.prev.log
         fi
-      - echo "" > /tmp/logs/debug.log
+      - echo "" > /tmp/logs/pi-minions/debug.log
       - |
         echo ""
         echo "  ┌───────────────────────────────────────────-──┐"
         echo "  │  pi-minions dev session starting             │"
         echo "  │  Open a second terminal and run: task logs   │"
-        echo "  │  Log: ./tmp/logs/debug.log                   │"
+        echo "  │  Log: ./tmp/logs/pi-minions/debug.log                   │"
         echo "  └───────────────────────────────────────────-──┘"
         echo ""
       - pi -e ./src/index.ts
@@ -77,7 +94,6 @@ tasks:
         else
           npx vitest run
         fi
-      - rm -f /tmp/logs/pi-minions/minions/*-test-minion.log
     silent: true
 
   test:e2e:
@@ -89,6 +105,7 @@ tasks:
         echo "    $ task test:e2e -- graceful"
         echo " "
       - ./scripts/e2e.sh {{.CLI_ARGS}}
+    silent: true
 
   logs:
     desc: "Tail debug log in real time (run in a second terminal alongside 'task dev')"

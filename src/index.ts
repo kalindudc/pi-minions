@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, BeforeAgentStartEvent } from "@mariozechner/pi-coding-agent";
 import type { Model } from "@mariozechner/pi-ai";
 import { AgentTree } from "./tree.js";
 import { ResultQueue } from "./queue.js";
@@ -22,6 +22,21 @@ import { SubsessionManager } from "./subsessions/manager.js";
 import { EventBus } from "./subsessions/event-bus.js";
 import { getTempSessionPath } from "./subsessions/paths.js";
 import { minionSpawnRenderer } from "./renderers/minion-spawn.js";
+import { AgentMessage } from "@mariozechner/pi-agent-core";
+
+function createDelegationHint(toolCallCount: number): string {
+  return "\n\n[DELEGATION REMINDER]: You have made: " + toolCallCount +
+        " tool calls. The pi-minions extension is active and provides tools for parallel execution and work delegation." +
+        "\nConsider delegating independent subtasks to minions for faster, isolated processing." +
+        "\nFollow any delegation skills or principles you have been provided by the system or the user.";
+}
+
+function buildPromptFromContext(messages: AgentMessage[]): string {
+  return messages
+    .filter(msg => msg.role === "user")
+    .map(msg => typeof msg.content === "string" ? msg.content : "")
+    .join("\n");
+}
 
 export default function (pi: ExtensionAPI): void {
   logger.debug("extension", "loaded", { logFile: LOG_FILE });
@@ -31,6 +46,26 @@ export default function (pi: ExtensionAPI): void {
   const queue = new ResultQueue();
   // SubsessionManager is initialized in session_start event
   let subsessionManager: SubsessionManager | undefined;
+
+  // Minion status tracking (background and foreground)
+  // Status tracker is initialized after subsessionManager in session_start
+  let statusTracker: ReturnType<typeof createStatusTracker> | undefined;
+  let cachedUi: ExtensionContext["ui"] | null = null;
+  let cachedCtx: ExtensionContext | null = null;
+  let cachedModel: Model<any> | undefined;
+
+  // EventBus for minion progress streaming
+  const eventBus = new EventBus();
+
+  // Delegation conscience: Track tool calls and inject delegation reminder
+  const TOOL_CALL_THRESHOLD = 8;
+  const HINT_INTERVAL = 60000 * 5;
+
+  let toolCallCount = 0;
+  let lastPromptText = "";
+  let lastHintTime = 0;
+
+  let usedMinionsThisSession = false;
 
   pi.registerTool({
     name: "spawn",
@@ -53,6 +88,7 @@ export default function (pi: ExtensionAPI): void {
     parameters: SpawnToolParams,
     execute: (...args) => {
       if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      usedMinionsThisSession = true;
       return spawn(tree, queue, pi, subsessionManager)(...args);
     },
     renderCall,
@@ -75,6 +111,7 @@ export default function (pi: ExtensionAPI): void {
     parameters: SpawnBgToolParams,
     execute: (...args) => {
       if (!subsessionManager) throw new Error("SubsessionManager not initialized");
+      usedMinionsThisSession = true;
       return spawnBg(tree, queue, pi, subsessionManager)(...args);
     },
   });
@@ -156,14 +193,6 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // Note: prototype view removed - observability approach under reconsideration
-
-  // Minion status tracking (background and foreground)
-  // Status tracker is initialized after subsessionManager in session_start
-  let statusTracker: ReturnType<typeof createStatusTracker> | undefined;
-  let cachedUi: ExtensionContext["ui"] | null = null;
-  let cachedCtx: ExtensionContext | null = null;
-  let cachedModel: Model<any> | undefined;
 
   tree.onChange(() => statusTracker?.refresh());
   pi.on("tool_execution_end", (event) => {
@@ -171,13 +200,53 @@ export default function (pi: ExtensionAPI): void {
     statusTracker?.refresh();
   });
 
-  // EventBus for minion progress streaming
-  const eventBus = new EventBus();
+  pi.on("turn_start", async () => {
+    // none
+  });
+
+  pi.on("tool_call", async () => {
+    toolCallCount++;
+  });
+
+  pi.on("context", async (event, ctx) => {
+    const prompt = buildPromptFromContext(event.messages);
+    const isComplexTask = toolCallCount >= TOOL_CALL_THRESHOLD ||
+      prompt.length > 200 ||
+      /\b(investigate|audit|review|refactor|analyze|implement)\b/i.test(prompt);
+
+    lastPromptText = prompt;
+
+    // only send hint if we haven't used minions yet in this session, it's a complex task
+    // and we haven't sent a hint recently (avoid spamming hints on every turn for complex tasks)
+    const currentTime = Date.now();
+    const shouldSendHint = !usedMinionsThisSession && isComplexTask && (currentTime - lastHintTime > HINT_INTERVAL);
+
+    const messages = [...event.messages]
+
+    // Only inject hint for complex tasks and when prompt changes (avoid spam)
+    if (shouldSendHint) {
+      logger.debug("delegation", "injecting_hint", { toolCallCount, promptLength: prompt.length });
+
+      messages.push({
+        role: "user",
+        content: createDelegationHint(toolCallCount),
+        timestamp: currentTime,
+      });
+
+      toolCallCount = 0;
+      lastHintTime = currentTime;
+    }
+
+    return {
+      messages: messages,
+    };
+  });
 
   pi.on("session_start", (_event, ctx) => {
     cachedCtx = ctx;
     cachedModel = ctx.model;
     cachedUi = ctx.ui;
+    usedMinionsThisSession = false;
 
     // Create subsession manager for file-based minion sessions (always use file-based)
     const parentSessionPath = ctx.sessionManager?.getSessionFile() ?? getTempSessionPath(ctx.cwd);
@@ -204,3 +273,4 @@ export default function (pi: ExtensionAPI): void {
     }));
   });
 }
+

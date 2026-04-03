@@ -173,7 +173,7 @@ describe("minion status widget", () => {
     expect(frame?.join("\n")).toContain("test-minion");
     expect(frame?.join("\n")).toContain("minion-123");
     expect(frame?.join("\n")).toContain("→ grep -r TODO src/");
-    expect(frame?.join("\n")).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/); // spinner character
+    expect(frame?.join("\n")).toMatch(/\[o[-o]*\]|\[-+o?\]/); // new ASCII spinner pattern
   });
 
   it("renders completed minion with checkmark and usage", () => {
@@ -286,7 +286,7 @@ describe("minion status widget", () => {
     const secondFrame = harness.tui.renderLog[1]?.lines.join("\n");
 
     // Running state shows spinner, completed shows checkmark
-    expect(firstFrame).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+    expect(firstFrame).toMatch(/\[o[-o]*\]|\[-+o?\]/); // new ASCII spinner pattern
     expect(secondFrame).toContain("✓");
     expect(secondFrame).toContain("8 turns");
     expect(secondFrame).toContain("↑5.0k");

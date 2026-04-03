@@ -208,3 +208,16 @@ Foreground spawn races `runMinionSession()` against a detach promise:
 - **Detach flow:** user runs `/minions bg` → disconnect parent abort signal → wire result to queue → return "sent to background"
 
 The key insight is that the **same session continues** — there's no kill/respawn. The detach just redirects where the result goes.
+
+### Delegation conscience
+
+The extension monitors the parent agent's activity and injects delegation reminders into the system prompt when appropriate. This solves the fundamental problem: the parent has minion tools available but forgets to use them.
+
+**Trigger conditions:**
+- 5+ tool calls in current turn
+- Prompt exceeds 200 characters
+- Keywords detected: investigate, audit, review, refactor, analyze, implement
+- Minions were not used previously in this session
+- A reminder was not sent within the last 5 minutes.
+
+**Implementation:** Uses `context` event to reminding the parent that parallel execution via minions is available. The hint only appears if minions were not previously used in this session and only once every five minutes matching our constraints.

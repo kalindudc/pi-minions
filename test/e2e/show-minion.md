@@ -4,9 +4,7 @@ Verify that the `show_minion` tool displays detailed status of a minion.
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

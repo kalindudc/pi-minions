@@ -4,9 +4,7 @@ Verify that a spawned minion does NOT have access to the spawn tool (preventing 
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

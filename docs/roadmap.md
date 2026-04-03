@@ -42,6 +42,7 @@
 - [ ] export minion transcripts and results to files
 - [ ] performance metrics and analytics dashboard
 - [ ] persistent steer history widget in TUI (notify toasts are transient, multiple steers lose history)
+- [ ] Add token usage to the foreground minion banner
 
 ### config and support
 - [x] step/turn count limits per minion
@@ -71,6 +72,7 @@
 - [ ] minion snapshots/checkpoints for long-running tasks
 - [ ] minion scheduling (run at specific times)
 - [ ] parallelize e2e tests to make them faster to run
+- [ ] consider createAgentSessionServices() for unified diagnostics
 
 ### v1.0.0 and beyond
 - [ ] integration with external tools/APIs

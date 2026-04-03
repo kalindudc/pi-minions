@@ -4,9 +4,7 @@ Verify that the `halt` tool stops a running background minion.
 
 ## Setup
 
-```bash
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-```
+None.
 
 ## Action
 

@@ -5,8 +5,7 @@ complete successfully and all start before any complete.
 
 ## Setup
 
-rm -f /tmp/logs/pi-minions/minions/*.log 2>/dev/null
-rm -f /tmp/logs/pi-minions/debug.log 2>/dev/null
+None.
 
 ## Action
 

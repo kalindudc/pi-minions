@@ -200,7 +200,7 @@ export function spawn(
       });
     };
 
-    const spinnerInterval = setInterval(() => { spinnerFrame++; emitUpdate(); }, 80);
+    const spinnerInterval = setInterval(() => { spinnerFrame++; emitUpdate(); }, 100);
 
     // Create abort controller for this session
     const controller = new AbortController();
