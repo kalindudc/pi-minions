@@ -18,7 +18,7 @@
 - [x] reduce spinner overhead: increase interval from 80ms to 200ms at src/tools/spawn.ts:196
 - [ ] minion recursion with depth limits (agent frontmatter config)
 - [ ] minion chaining (output of one feeds into another)
-- [ ] bug when the parent uses the halt tool, the aborted minion still sends back a user message, this is wasteful
+- [ ] bug: when the parent uses the halt tool, the aborted minion still sends back a user message, this is wasteful
 - [ ] add `/minions version` command to quickly see the running extension version
 - [ ] bring background minions to foreground with queue
 - [ ] bug: do not send a user message for background minion result, the LLM thinks it is from the user and evaluates as a user message which can lead to confusion
@@ -42,7 +42,16 @@
 - [ ] export minion transcripts and results to files
 - [ ] performance metrics and analytics dashboard
 - [ ] persistent steer history widget in TUI (notify toasts are transient, multiple steers lose history)
-- [ ] Add token usage to the foreground minion banner
+- [ ] add token usage to the foreground minion banner
+- [ ] add custom agent names next to the minion names if relevant, with support for a color/colour field in frontmatter
+
+### event bus & session management
+- [ ] `ResultQueue.onChange()` is never subscribed — status bar does not refresh when a background minion delivers its result
+- [ ] `detachBus` in `tools/spawn.ts` is a second isolated `EventBus` singleton — untestable and separate from the injected `eventBus`
+- [ ] `tree.updateActivity()` is called twice per session event — `spawn.ts` updates the tree in its own callbacks then forwards to `opts` callbacks which update it again
+- [ ] `MINION_COMPLETE_CHANNEL` is emitted five times in `manager.ts` but has no subscriber — completion drives `AgentTree` status through imperative callback chains instead of the event bus
+- [ ] transcript writer in `spawn.ts` is a third persistence layer marked transitional — `getMinionHistory()` reads from `/tmp` via `require()` at runtime instead of data already in the tree
+- [ ] minion status has two parallel stores — `AgentTree` and `SubsessionManager` both track status independently with no event-driven synchronisation between them
 
 ### config and support
 - [x] step/turn count limits per minion

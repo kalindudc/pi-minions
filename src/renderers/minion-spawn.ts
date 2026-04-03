@@ -50,14 +50,13 @@ export const minionSpawnRenderer: MessageRenderer<SpawnToolDetails> = (
   // Header: icon, name, id, and usage (for completed/failed)
   let header = `${theme.fg(statusColor, icon)} ${theme.fg(statusColor, data.name)}`;
   if (data.id) {
-    header += ` ${theme.fg("dim", `(${data.id})`)}`;  }
+    header += ` ${theme.fg("dim", `(${data.id})`)}`;
+  }
 
-  // Add usage for completed/failed minions
-  if (!isRunning && data.usage) {
-    header += ` ${theme.fg("muted", formatUsage(data.usage, data.model))}`;
-  } else {
-    // For running minions, show status
-    header += ` — ${data.status}`;
+  // Add usage
+  const usage = formatUsage(data.usage, data.model);
+  if (usage) {
+    header += ` ${theme.fg("muted", `— ${usage}`)}`;
   }
 
   // Activity line (if running)
