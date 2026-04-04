@@ -79,7 +79,7 @@ tasks:
         echo "  │  Log: ./tmp/logs/pi-minions/debug.log                   │"
         echo "  └───────────────────────────────────────────-──┘"
         echo ""
-      - pi -e ./src/index.ts
+      - pi
 
   typecheck:
     desc: "Run TypeScript type checker"
