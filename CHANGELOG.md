@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-04
+
+- chore: add Biome linter with zero-warning enforcement and `task style` command
+- fix: minion abort error - add completed guard to prevent post-execution onUpdate calls
+- fix: usage updates when minions are in-progress
+- fix: usage format in spawn-renderer
+- docs: update delegation reminder with acknowledge clause
+
 ## [0.8.0] - 2026-04-03
 
 - feat: add delegation conscience that monitors tool calls and injects delegation hints
