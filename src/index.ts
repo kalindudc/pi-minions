@@ -288,4 +288,18 @@ export default function (pi: ExtensionAPI): void {
       }),
     );
   });
+
+  pi.on("model_select", async (event, ctx) => {
+    cachedUi = ctx.ui;
+    cachedModel = event.model;
+
+    cachedUi.setFooter(
+      buildFooterFactory({
+        getCtx: () => cachedCtx,
+        getModel: () => cachedModel,
+        getThinkingLevel: () => pi.getThinkingLevel(),
+        tree,
+      }),
+    );
+  });
 }
