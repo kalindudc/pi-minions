@@ -4,8 +4,10 @@ import {
   formatTokens,
   formatToolCall,
   formatUsage,
+  renderCall,
   renderResult,
 } from "../src/render.js";
+import type { SpawnToolDetails } from "../src/tools/spawn.js";
 import type { UsageStats } from "../src/types.js";
 import { emptyUsage } from "../src/types.js";
 
@@ -116,6 +118,64 @@ describe("formatUsage", () => {
   });
 });
 
+describe("renderCall", () => {
+  // Minimal theme stub that returns text as-is (no ANSI codes)
+  const theme = {
+    fg: (_color: string, text: string) => text,
+    bold: (text: string) => text,
+  } as any;
+
+  it("renders task preview for single-task spawn with agent", () => {
+    const result = renderCall({ agent: "scout", task: "find bugs" }, theme, {});
+    const text = result.render(100).join("\n");
+    expect(text).toContain("spawn");
+    expect(text).toContain("find bugs");
+  });
+
+  it("renders task preview for single-task spawn without agent", () => {
+    const result = renderCall({ task: "fix the bug" }, theme, {});
+    const text = result.render(100).join("\n");
+    expect(text).toContain("spawn");
+    expect(text).toContain("fix the bug");
+  });
+
+  it("renders model when specified", () => {
+    const result = renderCall({ task: "t", model: "claude-4" }, theme, {});
+    const text = result.render(100).join("\n");
+    expect(text).toContain("claude-4");
+  });
+
+  it("renders batch header with minion count", () => {
+    const result = renderCall(
+      { tasks: [{ task: "t1" }, { task: "t2" }, { task: "t3" }] },
+      theme,
+      {},
+    );
+    const text = result.render(100).join("\n");
+    expect(text).toContain("spawn");
+    expect(text).toContain("[3 minions]");
+  });
+
+  it("renders singular for single-item batch", () => {
+    const result = renderCall({ tasks: [{ task: "t1" }] }, theme, {});
+    const text = result.render(100).join("\n");
+    expect(text).toContain("[1 minion]");
+  });
+
+  it("truncates long task previews", () => {
+    const longTask = "a".repeat(100);
+    const result = renderCall({ task: longTask }, theme, {});
+    const text = result.render(100).join("\n");
+    // Task previews longer than 60 chars are truncated with "…"
+    // Original task is 100 chars, truncated to 60 + "…" = 61 chars
+    expect(text).toContain("…");
+    // The text should contain the truncated portion (first 60 chars)
+    expect(text).toContain("a".repeat(60));
+    // The full 100 chars should NOT be present
+    expect(text).not.toContain("a".repeat(100));
+  });
+});
+
 describe("renderResult", () => {
   // Minimal theme stub that returns text as-is (no ANSI codes)
   const theme = {
@@ -124,7 +184,7 @@ describe("renderResult", () => {
   } as any;
 
   it("streaming render does not include inline /minions bg hint", () => {
-    const details = {
+    const details: SpawnToolDetails = {
       id: "abc",
       name: "kevin",
       agentName: "kevin",
@@ -148,7 +208,7 @@ describe("renderResult", () => {
   });
 
   it("streaming render caches name/id to state", () => {
-    const details = {
+    const details: SpawnToolDetails = {
       id: "abc",
       name: "kevin",
       agentName: "kevin",
@@ -183,7 +243,7 @@ describe("renderResult", () => {
   });
 
   it("renders completion layout when isPartial=true but status is completed", () => {
-    const details = {
+    const details: SpawnToolDetails = {
       id: "abc",
       name: "kevin",
       agentName: "kevin",
@@ -206,7 +266,7 @@ describe("renderResult", () => {
   });
 
   it("renders completion layout when isPartial=true but status is failed", () => {
-    const details = {
+    const details: SpawnToolDetails = {
       id: "abc",
       name: "kevin",
       agentName: "kevin",
@@ -236,5 +296,202 @@ describe("renderResult", () => {
     const lines = result.render(100);
     const text = lines.join("\n");
     expect(text).toContain("minion");
+  });
+
+  it("renders batch mode when isBatch is true", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "kevin",
+          task: "t1",
+          status: "running",
+          usage: emptyUsage(),
+          finalOutput: "",
+          spinnerFrame: 0,
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "bob",
+          task: "t2",
+          status: "running",
+          usage: emptyUsage(),
+          finalOutput: "",
+          spinnerFrame: 0,
+        },
+      ],
+      status: "running",
+      usage: emptyUsage(),
+      finalOutput: "",
+      spinnerFrame: 0,
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: true },
+      theme,
+      { isError: false },
+    );
+    const text = result.render(100).join("\n");
+    // Note: "[2 minions]" header is shown by renderCall, not renderResult (to avoid duplication)
+    expect(text).toContain("kevin");
+    expect(text).toContain("bob");
+    // Should show spinner icons for running minions
+    expect(text).toContain("[oo]");
+  });
+
+  it("batch render caches minions to state", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "kevin",
+          task: "t1",
+          status: "running",
+          usage: emptyUsage(),
+          finalOutput: "",
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "bob",
+          task: "t2",
+          status: "running",
+          usage: emptyUsage(),
+          finalOutput: "",
+        },
+      ],
+      status: "running",
+      usage: emptyUsage(),
+      finalOutput: "",
+    };
+    const state: { cachedMinions?: Array<{ name: string; id: string }> } = {};
+    renderResult({ content: [], details }, { expanded: false, isPartial: true }, theme, {
+      isError: false,
+      state,
+    });
+    expect(state.cachedMinions).toHaveLength(2);
+    expect(state.cachedMinions?.map((m) => m.name)).toContain("kevin");
+    expect(state.cachedMinions?.map((m) => m.name)).toContain("bob");
+  });
+
+  it("batch render falls back to cached minions when details missing", () => {
+    const state = {
+      cachedMinions: [
+        { name: "kevin", id: "1" },
+        { name: "bob", id: "2" },
+      ],
+    };
+    const result = renderResult(
+      { content: [{ type: "text", text: "error" }], details: undefined as any },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: false, state },
+    );
+    const text = result.render(100).join("\n");
+    // Note: "[2 minions]" header is shown by renderCall, not renderResult (to avoid duplication)
+    expect(text).toContain("kevin");
+    expect(text).toContain("bob");
+    // Should show checkmarks for completed status (fallback uses completed status)
+    expect(text).toContain("✓");
+  });
+
+  it("batch render shows completed checkmarks for completed minions", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "kevin",
+          task: "t1",
+          status: "completed",
+          usage: emptyUsage(),
+          finalOutput: "done",
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "bob",
+          task: "t2",
+          status: "completed",
+          usage: emptyUsage(),
+          finalOutput: "done2",
+        },
+      ],
+      status: "completed",
+      usage: emptyUsage(),
+      finalOutput: "",
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: false },
+    );
+    const text = result.render(100).join("\n");
+    expect(text).toContain("\u2713"); // Checkmark for completed
+    expect(text).not.toContain("[oo]"); // No spinner for completed
+    expect(text).toContain("kevin");
+    expect(text).toContain("bob");
+  });
+
+  it("batch render shows X marks for failed minions", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "kevin",
+          task: "t1",
+          status: "failed",
+          usage: emptyUsage(),
+          finalOutput: "error",
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "bob",
+          task: "t2",
+          status: "failed",
+          usage: emptyUsage(),
+          finalOutput: "error2",
+        },
+      ],
+      status: "failed",
+      usage: emptyUsage(),
+      finalOutput: "",
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: true },
+    );
+    const text = result.render(100).join("\n");
+    expect(text).toContain("\u2717"); // X for failed
+    expect(text).not.toContain("[oo]"); // No spinner
+    expect(text).not.toContain("\u2713"); // No checkmark (all failed)
   });
 });

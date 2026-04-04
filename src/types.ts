@@ -49,6 +49,7 @@ export interface SpawnResult {
 export interface AgentNode {
   id: string;
   name: string;
+  agentName?: string;
   task: string;
   status: AgentStatus;
   parentId?: string;

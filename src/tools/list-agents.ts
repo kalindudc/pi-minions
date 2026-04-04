@@ -2,7 +2,13 @@ import type { AgentToolResult, ExtensionContext } from "@mariozechner/pi-coding-
 import { Type } from "@sinclair/typebox";
 import { discoverAgents } from "../agents.js";
 
-export const ListAgentsParams = Type.Object({});
+export const ListAgentsParams = Type.Object(
+  {},
+  {
+    description:
+      "List all available agents that can be spawned as minions. No parameters required.",
+  },
+);
 
 export interface AgentInfo {
   name: string;

@@ -8,18 +8,53 @@ import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import { discoverAgents } from "../agents.js";
 import { logger } from "../logger.js";
-import { defaultMinionTemplate, generateId, pickMinionName } from "../minions.js";
+import { defaultMinionTemplate, generateId, MINION_NAMES } from "../minions.js";
 import type { ResultQueue } from "../queue.js";
 import { formatToolCall } from "../render.js";
 import { runMinionSession } from "../spawn.js";
 import { EventBus } from "../subsessions/event-bus.js";
 import type { SubsessionManager } from "../subsessions/manager.js";
 import type { AgentTree } from "../tree.js";
-import type { AgentConfig, UsageStats } from "../types.js";
+import type { AgentConfig, AgentStatus, UsageStats } from "../types.js";
 import { emptyUsage } from "../types.js";
 
 // Parameter schemas
-const baseParams = {
+// NOTE: Using a flat schema with optional fields for model-agnostic compatibility
+// (OpenAI doesn't support anyOf/oneOf in function schemas)
+const TaskDescriptor = Type.Object({
+  task: Type.String(),
+  agent: Type.Optional(Type.String()),
+  model: Type.Optional(Type.String()),
+});
+
+export const SpawnToolParams = Type.Object({
+  // Single task mode - use task directly
+  task: Type.Optional(
+    Type.String({ description: "Task to delegate to the agent (use this OR tasks, not both)" }),
+  ),
+  agent: Type.Optional(
+    Type.String({
+      description:
+        "Name of the agent to invoke. If omitted, spawns an ephemeral minion with default capabilities.",
+    }),
+  ),
+  model: Type.Optional(Type.String({ description: "Override the agent's model" })),
+  // Batch mode - use tasks array
+  tasks: Type.Optional(
+    Type.Array(TaskDescriptor, {
+      minItems: 1,
+      description: "Array of task descriptors for batch spawning (use this OR task, not both)",
+    }),
+  ),
+});
+export type SpawnToolParams = Static<typeof SpawnToolParams>;
+
+// Type guard for batch detection
+function isBatchParams(params: SpawnToolParams): boolean {
+  return "tasks" in params && Array.isArray(params.tasks) && params.tasks.length > 0;
+}
+
+export const SpawnBgToolParams = Type.Object({
   agent: Type.Optional(
     Type.String({
       description:
@@ -28,30 +63,39 @@ const baseParams = {
   ),
   task: Type.String({ description: "Task to delegate to the agent" }),
   model: Type.Optional(Type.String({ description: "Override the agent's model" })),
-};
-
-export const SpawnToolParams = Type.Object(baseParams);
-export type SpawnToolParams = Static<typeof SpawnToolParams>;
-
-export const SpawnBgToolParams = Type.Object(baseParams);
+});
 export type SpawnBgToolParams = Static<typeof SpawnBgToolParams>;
 
 // Types
-export interface SpawnToolDetails {
+export interface BatchMinionItem {
   id: string;
   name: string;
   agentName: string;
   task: string;
-  status: string;
+  status: AgentStatus;
   usage: UsageStats;
   model?: string;
   finalOutput: string;
   activity?: string;
   spinnerFrame?: number;
+  /** True if moved to background */
+  detached?: boolean;
 }
 
-/** Signal for detaching a foreground minion */
-export type DetachSignal = { id: string; resolve: () => void };
+export interface SpawnToolDetails {
+  id: string;
+  name: string;
+  agentName: string;
+  task: string;
+  status: AgentStatus;
+  usage: UsageStats;
+  model?: string;
+  finalOutput: string;
+  activity?: string;
+  spinnerFrame?: number;
+  isBatch?: boolean;
+  minions?: BatchMinionItem[];
+}
 
 // Config resolution
 function resolveConfig(
@@ -73,43 +117,6 @@ function resolveConfig(
     return found;
   }
   return defaultMinionTemplate(name, { model: params.model });
-}
-
-// Activity callbacks for tree updates
-function createActivityCallbacks(tree: AgentTree, id: string) {
-  return {
-    onToolActivity: (activity: {
-      type: "start" | "end";
-      toolName: string;
-      args?: Record<string, unknown>;
-    }) => {
-      if (activity.type === "start") {
-        const desc = formatToolCall(activity.toolName, activity.args ?? {});
-        tree.updateActivity(id, `→ ${desc}`);
-      }
-    },
-    onToolOutput: (_toolName: string, delta: string) => {
-      const line = delta.trimEnd().split("\n").filter(Boolean).at(-1) ?? "";
-      if (line) tree.updateActivity(id, `← ${line}`);
-    },
-    onTextDelta: (_delta: string, fullText: string) => {
-      // Show full last line without truncation to avoid cutting sentences
-      const preview = fullText.split("\n").filter(Boolean).at(-1) ?? "";
-      tree.updateActivity(id, preview);
-    },
-    onTurnEnd: (turnCount: number) => {
-      tree.updateActivity(id, `turn ${turnCount}`);
-    },
-    onUsageUpdate: (usage: {
-      input: number;
-      output: number;
-      cacheRead: number;
-      cacheWrite: number;
-      cost: number;
-    }) => {
-      tree.updateUsage(id, usage);
-    },
-  };
 }
 
 // Handle background completion
@@ -183,18 +190,471 @@ function createDetachBus() {
 // Shared detach bus across all spawn calls
 const detachBus = createDetachBus();
 
-/** Check if a minion is foreground (can be detached) */
-export function isForeground(id: string, subsessionManager: SubsessionManager): boolean {
-  // A minion is foreground if it's running and we're actively waiting on it
-  // This is tracked by checking if the session exists and is running
-  const session = subsessionManager.getSession(id);
-  const metadata = subsessionManager.getMetadata(id);
-  return session !== undefined && metadata?.status === "running";
-}
-
 /** Detach a foreground minion */
 export function detachMinion(id: string): void {
   detachBus.emit(id);
+}
+
+// Unified spawn execution - treats everything as a batch internally
+// The renderer handles the difference between 1 vs many minions
+async function executeSpawn(
+  specs: Array<{ task: string; agent?: string; model?: string }>,
+  toolCallId: string,
+  tree: AgentTree,
+  _queue: ResultQueue,
+  pi: ExtensionAPI,
+  subsessionManager: SubsessionManager,
+  signal: AbortSignal | undefined,
+  onUpdate: AgentToolUpdateCallback<SpawnToolDetails> | undefined,
+  ctx: ExtensionContext,
+): Promise<AgentToolResult<SpawnToolDetails>> {
+  const isSingleMinion = specs.length === 1;
+
+  logger.info("spawn:tool", isSingleMinion ? "start" : "batch-start", {
+    count: specs.length,
+  });
+
+  if (!isSingleMinion) {
+    logger.debug("spawn:tool", "batch-minions", {
+      minions: specs.map((s, i) => ({
+        index: i,
+        agent: s.agent ?? "ephemeral",
+        task: s.task.slice(0, 50),
+      })),
+    });
+  }
+
+  // Create minion items - track assigned names to ensure uniqueness
+  const assignedNames = new Set<string>();
+  const inUse = new Set(tree.getRunning().map((n) => n.name));
+
+  const minions: BatchMinionItem[] = specs.map((spec) => {
+    const id = generateId();
+    const available = MINION_NAMES.filter((n) => !inUse.has(n) && !assignedNames.has(n));
+    const name =
+      available.length > 0
+        ? (available[Math.floor(Math.random() * available.length)] ?? `minion-${id}`)
+        : `minion-${id}`;
+    assignedNames.add(name);
+
+    // Resolve config and model immediately so it's available for emitUpdate
+    const config = resolveConfig(spec, name, ctx.cwd);
+    const resolvedModel = spec.model ?? config.model ?? ctx.model?.id;
+
+    return {
+      id,
+      name,
+      agentName: spec.agent ?? "ephemeral",
+      task: spec.task,
+      status: "running",
+      usage: emptyUsage(),
+      model: resolvedModel,
+      finalOutput: "",
+      activity: "starting...",
+      spinnerFrame: 0,
+    };
+  });
+
+  // Add all to tree
+  for (const m of minions) {
+    tree.add(m.id, m.name, m.task, undefined, m.agentName);
+  }
+
+  // Shared abort controller
+  const controller = new AbortController();
+  if (signal) {
+    const onAbort = () => controller.abort();
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  // Spinner animation - runs independently every 100ms regardless of minion activity
+  let completed = false;
+  const spinnerInterval = setInterval(() => {
+    if (completed) return;
+
+    let frameUpdated = false;
+    for (const m of minions) {
+      if (m.status === "running") {
+        m.spinnerFrame = (m.spinnerFrame ?? 0) + 1;
+        frameUpdated = true;
+      }
+    }
+
+    // Only emit update if at least one minion is still running
+    // This prevents unnecessary updates after all minions complete
+    if (frameUpdated) {
+      emitUpdate();
+    }
+  }, 100);
+
+  // Create batch tracking ID
+  const batchId = generateId();
+  const batchName = isSingleMinion ? minions[0].name : `batch-${batchId.slice(0, 8)}`;
+
+  // Emit update function
+  const emitUpdate = () => {
+    if (completed) return;
+
+    const firstMinion = minions[0];
+    const allCompleted = minions.every((m) => m.status === "completed");
+    const anyFailed = minions.some((m) => m.status === "failed");
+    const anyAborted = minions.some((m) => m.status === "aborted");
+    const status = anyAborted
+      ? "aborted"
+      : anyFailed
+        ? "failed"
+        : allCompleted
+          ? "completed"
+          : "running";
+
+    const totalUsage = minions.reduce(
+      (acc, m) => ({
+        input: acc.input + m.usage.input,
+        output: acc.output + m.usage.output,
+        cacheRead: acc.cacheRead + m.usage.cacheRead,
+        cacheWrite: acc.cacheWrite + m.usage.cacheWrite,
+        cost: acc.cost + m.usage.cost,
+        contextTokens: acc.contextTokens + m.usage.contextTokens,
+        turns: acc.turns + m.usage.turns,
+      }),
+      emptyUsage(),
+    );
+
+    // For single minion with simple output, don't wrap with name
+    const finalOutput =
+      isSingleMinion && minions.length === 1
+        ? firstMinion.finalOutput
+        : minions.map((m) => `=== ${m.name} ===\n${m.finalOutput}`).join("\n\n");
+
+    onUpdate?.({
+      content: [{ type: "text", text: "" }],
+      details: {
+        id: isSingleMinion ? firstMinion.id : batchId,
+        name: isSingleMinion ? firstMinion.name : batchName,
+        agentName: isSingleMinion ? firstMinion.agentName : "batch",
+        task: isSingleMinion ? firstMinion.task : `batch of ${specs.length} minions`,
+        isBatch: true,
+        minions: [...minions],
+        status,
+        usage: totalUsage,
+        model: firstMinion.model,
+        finalOutput,
+      },
+    });
+  };
+
+  // Track detached minions
+  const detachedMinions = new Set<string>();
+  const detachResolvers = new Map<string, () => void>();
+
+  // Run all minions in parallel
+  const sessionPromises = minions.map(async (m, index) => {
+    const spec = specs[index];
+    if (!spec) {
+      throw new Error(`No spec found for minion at index ${index}`);
+    }
+
+    // Config was already resolved when creating minion, but we need it here for runMinionSession
+    const config = resolveConfig(spec, m.name, ctx.cwd);
+
+    // Emit initial update for this minion
+    emitUpdate();
+
+    try {
+      const sessionPromise = runMinionSession(config, spec.task, {
+        id: m.id,
+        name: m.name,
+        signal: controller.signal,
+        modelRegistry: ctx.modelRegistry,
+        parentModel: ctx.model,
+        cwd: ctx.cwd,
+        subsessionManager,
+        spawnedBy: toolCallId,
+        parentSessionPath: ctx.sessionManager?.getSessionFile() ?? undefined,
+        onToolActivity: (activity) => {
+          if (activity.type === "start") {
+            const desc = formatToolCall(activity.toolName, activity.args ?? {});
+            m.activity = `→ ${desc}`;
+            tree.updateActivity(m.id, `→ ${desc}`);
+            emitUpdate();
+          }
+        },
+        onToolOutput: (toolName, delta) => {
+          const line = delta.trimEnd().split("\n").filter(Boolean).at(-1) ?? "";
+          if (line) {
+            m.activity = `${toolName}: ${line}`;
+            tree.updateActivity(m.id, `${toolName}: ${line}`);
+            emitUpdate();
+          }
+        },
+        onTextDelta: (_delta, fullText) => {
+          const preview = fullText.split("\n").filter(Boolean).at(-1) ?? "";
+          m.activity = preview;
+          m.finalOutput = preview;
+          tree.updateActivity(m.id, preview);
+          emitUpdate();
+        },
+        onTurnEnd: (turnCount) => {
+          tree.updateActivity(m.id, `turn ${turnCount}`);
+        },
+        onUsageUpdate: (usage) => {
+          tree.updateUsage(m.id, usage);
+          m.usage = {
+            input: usage.input,
+            output: usage.output,
+            cacheRead: usage.cacheRead,
+            cacheWrite: usage.cacheWrite,
+            cost: usage.cost,
+            contextTokens: 0,
+            turns: 0,
+          };
+          emitUpdate();
+        },
+      });
+
+      // Support detach for this minion
+      let detachResolve: (() => void) | undefined;
+
+      const detachPromise = new Promise<{
+        exitCode: number;
+        finalOutput: string;
+        usage: UsageStats;
+        detached: boolean;
+      }>((resolve) => {
+        detachResolve = () => {
+          detachedMinions.add(m.id);
+          resolve({
+            exitCode: 0,
+            finalOutput: "detached",
+            usage: { ...emptyUsage() },
+            detached: true,
+          });
+        };
+        detachResolvers.set(m.id, detachResolve);
+      });
+
+      // Set up listener to trigger detach
+      const unsubscribeThisDetach = detachBus.on(m.id, () => {
+        logger.debug("spawn:tool", "minion-detached", {
+          id: m.id,
+          name: m.name,
+          batch: !isSingleMinion,
+        });
+        detachResolve?.();
+      });
+
+      const result = await Promise.race([sessionPromise, detachPromise]);
+
+      unsubscribeThisDetach();
+
+      // Handle detach - check using the detachedMinions set since result might be either type
+      if ("detached" in result || detachedMinions.has(m.id)) {
+        logger.debug("spawn:tool", "detached", { id: m.id, name: m.name, batch: !isSingleMinion });
+        tree.markDetached(m.id);
+        m.detached = true; // Mark as detached so it's filtered from foreground display
+        const startTime = tree.get(m.id)?.startTime ?? Date.now();
+        handleBgCompletion(sessionPromise, m.id, m.name, spec.task, startTime, tree, _queue, pi);
+        // Keep status as running since it's now in background
+        m.status = "running";
+        m.finalOutput = "Moved to background by user";
+        emitUpdate(); // Emit update so UI shows detached status
+        return {
+          success: true,
+          result: {
+            exitCode: 0,
+            finalOutput: `Moved to background by user`,
+            usage: tree.get(m.id)?.usage ?? emptyUsage(),
+          },
+          detached: true,
+        };
+      }
+
+      // Normal completion - but don't overwrite "aborted" status
+      const currentStatus = tree.get(m.id)?.status;
+      if (currentStatus !== "aborted") {
+        m.status = result.exitCode === 0 ? "completed" : "failed";
+        m.finalOutput = result.finalOutput;
+        m.usage = result.usage;
+        const errorMsg =
+          typeof result === "object" && result && "error" in result
+            ? String(result.error)
+            : undefined;
+        tree.updateStatus(m.id, m.status, result.exitCode, errorMsg);
+        tree.updateUsage(m.id, result.usage);
+        emitUpdate(); // Emit update so UI shows final status
+      } else {
+        // Minion was aborted - keep the aborted status
+        m.status = "aborted";
+        m.finalOutput = result.finalOutput;
+        emitUpdate(); // Emit update so UI shows aborted status
+      }
+
+      if (!isSingleMinion) {
+        logger.debug("spawn:tool", "batch-minion-complete", {
+          id: m.id,
+          name: m.name,
+          status: m.status,
+          exitCode: result.exitCode,
+        });
+      }
+
+      return { success: result.exitCode === 0, result };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      m.status = "failed";
+      m.finalOutput = msg;
+      tree.updateStatus(m.id, "failed", 1, msg);
+      logger.error("spawn:tool", isSingleMinion ? "failed" : "batch-minion-failed", {
+        id: m.id,
+        name: m.name,
+        error: msg,
+      });
+      return { success: false, error: msg };
+    }
+  });
+
+  // Wait for all to complete (or be detached)
+  const results = await Promise.allSettled(sessionPromises);
+  completed = true;
+  clearInterval(spinnerInterval);
+
+  // Aggregate results
+  const anyFailed = results.some((r, idx) => {
+    const m = minions[idx];
+    // Detached minions are not considered failures
+    if (m && detachedMinions.has(m.id)) return false;
+    return r.status === "rejected" || !(r.value as { success: boolean }).success;
+  });
+
+  // Count completed (non-detached) minions
+  const completedCount = minions.filter((m) => m.status === "completed").length;
+  const detachedCount = detachedMinions.size;
+  const failedCount = minions.filter((m) => m.status === "failed").length;
+  const abortedCount = minions.filter((m) => m.status === "aborted").length;
+
+  // Determine final status
+  // Priority: aborted > failed > completed > running
+  const hasDetached = detachedCount > 0;
+  const hasCompletedNonDetached = minions.some(
+    (m) => !detachedMinions.has(m.id) && m.status === "completed",
+  );
+
+  let finalStatus: AgentStatus;
+  if (abortedCount > 0) {
+    finalStatus = "aborted";
+  } else if (anyFailed) {
+    finalStatus = "failed";
+  } else if (hasCompletedNonDetached || (!hasDetached && completedCount > 0)) {
+    // Completed if there are completed non-detached minions, or if no detachments and some completed
+    finalStatus = "completed";
+  } else if (hasDetached) {
+    // Running if any were detached (they continue in background)
+    finalStatus = "running";
+  } else {
+    finalStatus = "failed";
+  }
+
+  // Emit final update
+  emitUpdate();
+
+  const firstMinion = minions[0];
+  const finalOutput = minions.map((m) => `=== ${m.name} ===\n${m.finalOutput}`).join("\n\n");
+
+  if (isSingleMinion) {
+    logger.info("spawn:tool", finalStatus === "completed" ? "completed" : "failed", {
+      id: firstMinion.id,
+      exitCode: anyFailed ? 1 : 0,
+    });
+  } else {
+    logger.info("spawn:tool", "batch-complete", {
+      count: specs.length,
+      status: finalStatus,
+      succeeded: completedCount,
+      detached: detachedCount,
+      failed: failedCount,
+    });
+  }
+
+  // Build result text
+  const detachedNames = minions.filter((m) => detachedMinions.has(m.id)).map((m) => m.name);
+
+  let resultText: string;
+  if (isSingleMinion) {
+    const m = minions[0];
+    if (detachedMinions.has(m.id)) {
+      resultText = `[USER ACTION] Minion ${m.name} (${m.id}) was moved to background. It is still running and will deliver results when complete.`;
+    } else {
+      resultText = `Minion ${m.name} (${m.id}) ${finalStatus}.\n\n${finalOutput || "(no output)"}`;
+    }
+  } else {
+    const parts: string[] = [];
+    parts.push(`Batch complete: ${completedCount} completed`);
+    if (detachedCount > 0) {
+      parts.push(`${detachedCount} detached (${detachedNames.join(", ")})`);
+    }
+    if (failedCount > 0) {
+      parts.push(`${failedCount} failed`);
+    }
+    resultText = `${parts.join(", ")}\n\n${finalOutput}`;
+  }
+
+  // Build result
+  const result: AgentToolResult<SpawnToolDetails> = {
+    content: [{ type: "text", text: resultText }],
+    details: {
+      id: isSingleMinion ? firstMinion.id : batchId,
+      name: isSingleMinion ? firstMinion.name : batchName,
+      agentName: isSingleMinion ? firstMinion.agentName : "batch",
+      task: isSingleMinion ? firstMinion.task : `batch of ${specs.length} minions`,
+      status: finalStatus,
+      usage: minions.reduce(
+        (acc, m) => ({
+          input: acc.input + m.usage.input,
+          output: acc.output + m.usage.output,
+          cacheRead: acc.cacheRead + m.usage.cacheRead,
+          cacheWrite: acc.cacheWrite + m.usage.cacheWrite,
+          cost: acc.cost + m.usage.cost,
+          contextTokens: acc.contextTokens + m.usage.contextTokens,
+          turns: acc.turns + m.usage.turns,
+        }),
+        emptyUsage(),
+      ),
+      finalOutput,
+      isBatch: true,
+      minions: [...minions],
+    },
+  };
+
+  // Check for aborted status (only for non-detached minions) - must check before anyFailed
+  // because an aborted minion will also have failed status
+  for (const m of minions) {
+    if (detachedMinions.has(m.id)) continue; // Skip detached minions
+    const currentNode = tree.get(m.id);
+    if (currentNode?.status === "aborted") {
+      throw new Error(
+        `[HALTED] Minion ${m.name} (${m.id}) was stopped by the user. This is intentional — do NOT retry or re-spawn.`,
+      );
+    }
+  }
+
+  if (anyFailed) {
+    if (isSingleMinion) {
+      const m = minions[0];
+      const errorMsg = m.finalOutput || `exited with error`;
+      throw new Error(`Minion ${m.name} (${m.id}) failed: ${errorMsg}`);
+    } else {
+      const failedNames = minions.filter((m) => m.status === "failed").map((m) => m.name);
+      throw new Error(
+        `Batch spawn failed. Failed minions: ${failedNames.join(", ")}. Check individual outputs for details.`,
+      );
+    }
+  }
+
+  return result;
 }
 
 // Foreground spawn (blocks parent, streams progress)
@@ -211,231 +671,37 @@ export function spawn(
     onUpdate: AgentToolUpdateCallback<SpawnToolDetails> | undefined,
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SpawnToolDetails>> {
-    const id = generateId();
-    const name = pickMinionName(tree, id);
-    const config = resolveConfig(params, name, ctx.cwd);
-    logger.info("spawn:tool", "start", {
-      id,
-      name,
-      agent: params.agent ?? "ephemeral",
-      task: params.task,
-    });
+    // Validate params - must have either task or tasks, not both
+    const hasTask = params.task && typeof params.task === "string" && params.task.length > 0;
+    const hasTasks = isBatchParams(params);
 
-    tree.add(id, name, params.task);
-
-    // Track UI state
-    let lastActivity: string | undefined;
-    let lastOutput = "";
-    let spinnerFrame = 0;
-    let completed = false;
-    const resolvedModel = params.model ?? config.model ?? ctx.model?.id;
-
-    // Simple emitUpdate - emits immediately on every call
-    const emitUpdate = (partial?: Partial<SpawnToolDetails>) => {
-      if (completed) return;
-      if (partial?.activity !== undefined) lastActivity = partial.activity;
-      if (partial?.finalOutput !== undefined) lastOutput = partial.finalOutput;
-
-      const node = tree.get(id);
-      onUpdate?.({
-        content: [{ type: "text", text: lastOutput }],
-        details: {
-          id,
-          name,
-          agentName: params.agent ?? config.name,
-          task: params.task,
-          status: node?.status ?? "running",
-          usage: { ...(node?.usage ?? emptyUsage()) },
-          model: resolvedModel,
-          finalOutput: lastOutput,
-          activity: lastActivity,
-          spinnerFrame,
-        },
-      });
-    };
-
-    // Spinner animation - emits update every 100ms for smooth UX
-    const spinnerInterval = setInterval(() => {
-      spinnerFrame++;
-      emitUpdate();
-    }, 100);
-
-    // Create abort controller for this session
-    const controller = new AbortController();
-
-    // Wire parent's abort signal
-    if (signal) {
-      const onAbort = () => controller.abort();
-      if (signal.aborted) {
-        controller.abort();
-      } else {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
+    if (hasTask && hasTasks) {
+      throw new Error("Cannot specify both 'task' and 'tasks'. Use one or the other.");
+    }
+    if (!hasTask && !hasTasks) {
+      throw new Error("Must specify either 'task' (single) or 'tasks' (batch).");
     }
 
-    // Set up detach listener - uses separate mechanism from abort
-    let detached = false;
-    let detachResolve: (() => void) | undefined;
-    const detachPromise = new Promise<void>((resolve) => {
-      detachResolve = resolve;
-    });
-    const unsubscribeDetach = detachBus.on(id, () => {
-      if (!detached) {
-        detached = true;
-        detachResolve?.();
-        // Note: We do NOT abort the controller here - the session continues running
-      }
+    // Normalize to specs array - unified handling
+    const specs = hasTasks
+      ? params.tasks || []
+      : [{ task: params.task || "", agent: params.agent, model: params.model }];
+
+    logger.debug("spawn:tool", hasTasks ? "batch-mode" : "single-mode", {
+      count: specs.length,
     });
 
-    try {
-      const sessionPromise = runMinionSession(config, params.task, {
-        id,
-        name,
-        signal: controller.signal,
-        modelRegistry: ctx.modelRegistry,
-        parentModel: ctx.model,
-        cwd: ctx.cwd,
-        subsessionManager,
-        spawnedBy: _toolCallId,
-        parentSessionPath: ctx.sessionManager?.getSessionFile() ?? undefined,
-        onToolActivity: (activity) => {
-          if (activity.type === "start") {
-            const desc = formatToolCall(activity.toolName, activity.args ?? {});
-            emitUpdate({ activity: `→ ${desc}` });
-            tree.updateActivity(id, `→ ${desc}`);
-          }
-        },
-        onToolOutput: (toolName, delta) => {
-          const line = delta.trimEnd().split("\n").filter(Boolean).at(-1) ?? "";
-          if (line) {
-            emitUpdate({ activity: `${toolName}: ${line}` });
-            tree.updateActivity(id, `${toolName}: ${line}`);
-          }
-        },
-        onTextDelta: (_delta, fullText) => {
-          const preview = fullText.split("\n").filter(Boolean).at(-1) ?? "";
-          emitUpdate({ activity: preview, finalOutput: preview });
-          tree.updateActivity(id, preview);
-        },
-        onTurnEnd: (turnCount) => {
-          tree.updateActivity(id, `turn ${turnCount}`);
-        },
-        onUsageUpdate: (partial) => {
-          tree.updateUsage(id, partial);
-          // Trigger batched update to show usage (but don't emit immediately)
-          emitUpdate();
-        },
-        // Activity callbacks are defined above inline
-      });
-
-      // Wait for either session completion OR detach signal
-      const result = await Promise.race([
-        sessionPromise,
-        detachPromise.then(() => ({
-          exitCode: 0,
-          finalOutput: "detached",
-          usage: { ...emptyUsage() },
-          detached: true,
-        })),
-      ]);
-
-      // If detached, set up background completion handling and return
-      if (detached || ("detached" in result && result.detached)) {
-        logger.debug("spawn:tool", "detached", { id, name });
-        // Mark the minion as detached in the tree (updates foreground/background status)
-        tree.markDetached(id);
-        // Set up background completion handling
-        const startTime = tree.get(id)?.startTime ?? Date.now();
-        handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, queue, pi);
-        // Emit final update to refresh sibling minions' UI immediately
-        emitUpdate({ finalOutput: `Moved to background by user` });
-        return {
-          content: [
-            {
-              type: "text",
-              text: `[USER ACTION] The user moved minion ${name} (${id}) to background via /minions bg. The minion is still running and will deliver its result when complete. Continue with other tasks.`,
-            },
-          ],
-          details: {
-            id,
-            name,
-            agentName: params.agent ?? config.name,
-            task: params.task,
-            status: "running",
-            usage: tree.get(id)?.usage ?? emptyUsage(),
-            model: resolvedModel,
-            finalOutput: `Moved to background by user`,
-          },
-        };
-      }
-
-      // Normal completion (completed, failed, or aborted)
-      const currentNode = tree.get(id);
-      const status =
-        currentNode?.status === "aborted"
-          ? "aborted"
-          : result.exitCode === 0
-            ? "completed"
-            : "failed";
-
-      if (status !== "aborted") {
-        logger.info("spawn:tool", status, {
-          id,
-          exitCode: result.exitCode,
-          outputLen: result.finalOutput.length,
-        });
-        const errorMsg =
-          typeof result === "object" && result && "error" in result
-            ? String(result.error)
-            : undefined;
-        tree.updateStatus(id, status, result.exitCode, errorMsg);
-      }
-
-      tree.updateUsage(id, result.usage);
-
-      // ALWAYS emit final update to refresh sibling minions' UI immediately
-      // This must happen before returning or throwing so siblings re-render
-      emitUpdate({ finalOutput: result.finalOutput });
-
-      const node = tree.get(id);
-      const details: SpawnToolDetails = {
-        id,
-        name,
-        agentName: params.agent ?? config.name,
-        task: params.task,
-        status,
-        usage: node?.usage ?? result.usage,
-        model: resolvedModel,
-        finalOutput: result.finalOutput,
-      };
-
-      if (status === "aborted") {
-        throw new Error(
-          `[HALTED] Minion ${name} (${id}) was stopped by the user. This is intentional — do NOT retry or re-spawn.`,
-        );
-      }
-      if (result.exitCode !== 0) {
-        const errorMsg =
-          typeof result === "object" && result && "error" in result
-            ? String(result.error)
-            : `exited with code ${result.exitCode}`;
-        throw new Error(`Minion ${name} (${id}) failed: ${errorMsg}`);
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Minion ${name} (${id}) completed.\n\n${result.finalOutput || "(no output)"}`,
-          },
-        ],
-        details,
-      };
-    } finally {
-      completed = true; // Mark as completed to prevent further onUpdate calls
-      clearInterval(spinnerInterval);
-      unsubscribeDetach();
-    }
+    return executeSpawn(
+      specs,
+      _toolCallId,
+      tree,
+      queue,
+      pi,
+      subsessionManager,
+      signal,
+      onUpdate,
+      ctx,
+    );
   };
 }
 
@@ -454,9 +720,16 @@ export function spawnBg(
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SpawnToolDetails>> {
     const id = generateId();
-    const name = pickMinionName(tree, id);
+    const inUse = new Set(tree.getRunning().map((n) => n.name));
+    const available = MINION_NAMES.filter((n) => !inUse.has(n));
+    const name =
+      available.length > 0
+        ? (available[Math.floor(Math.random() * available.length)] ?? `minion-${id}`)
+        : `minion-${id}`;
+
     const config = resolveConfig(params, name, ctx.cwd);
     const resolvedModel = params.model ?? config.model ?? ctx.model?.id;
+
     logger.info("spawn:tool", "start-bg", {
       id,
       name,
@@ -464,15 +737,12 @@ export function spawnBg(
       task: params.task,
     });
 
-    tree.add(id, name, params.task);
-    // Mark as detached immediately since this is a background spawn
+    tree.add(id, name, params.task, undefined, params.agent ?? "ephemeral");
     tree.markDetached(id);
 
     const controller = new AbortController();
     const startTime = Date.now();
 
-    // Start the session without awaiting - truly fire-and-forget
-    // We use void to explicitly ignore the promise and prevent unhandled rejection warnings
     const sessionPromise = runMinionSession(config, params.task, {
       id,
       name,
@@ -483,10 +753,27 @@ export function spawnBg(
       subsessionManager,
       spawnedBy: _toolCallId,
       parentSessionPath: ctx.sessionManager?.getSessionFile() ?? undefined,
-      ...createActivityCallbacks(tree, id),
+      onToolActivity: (activity) => {
+        if (activity.type === "start") {
+          tree.updateActivity(id, `→ ${formatToolCall(activity.toolName, activity.args ?? {})}`);
+        }
+      },
+      onToolOutput: (toolName, delta) => {
+        const line = delta.trimEnd().split("\n").filter(Boolean).at(-1) ?? "";
+        if (line) tree.updateActivity(id, `${toolName}: ${line}`);
+      },
+      onTextDelta: (_delta, fullText) => {
+        const preview = fullText.split("\n").filter(Boolean).at(-1) ?? "";
+        tree.updateActivity(id, preview);
+      },
+      onTurnEnd: (turnCount) => {
+        tree.updateActivity(id, `turn ${turnCount}`);
+      },
+      onUsageUpdate: (usage) => {
+        tree.updateUsage(id, usage);
+      },
     });
 
-    // Set up completion handling but don't await the promise
     handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, queue, pi);
 
     const result: AgentToolResult<SpawnToolDetails> = {

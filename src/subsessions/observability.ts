@@ -233,21 +233,25 @@ class MinionObservabilityWidget {
     const dim = (s: string) => theme.fg("dim", s);
     const muted = (s: string) => theme.fg("muted", s);
 
-    // Get node to check detached status
+    // Get node to check detached status and agent name
     const node = this.tree.get(this.minionId);
     const isDetached = node?.detached ?? false;
     const badge = isDetached ? "[bg]" : "[fg]";
 
-    // Header line: badge + minion name + help
-    const headerText = `${badge} ${this.minionName} (${this.minionId.slice(0, 6)}...)`;
+    // Header line: badge + agent name + minion name + id + help
+    const displayName =
+      node?.agentName && node.agentName !== "ephemeral"
+        ? `${node.agentName} ${this.minionName}`
+        : this.minionName;
+    const headerText = `${badge} ${displayName} (${this.minionId})`;
     const helpText = "q/esc:close · tab/shift+tab:navigate";
 
     // Header with accent for badge+name, dim for help
     const headerLine = `${theme.fg("accent", this.truncate(headerText, width - helpText.length - 3))}  ${dim(helpText)}`;
     lines.push(headerLine);
 
-    // Separator line (underscore style)
-    lines.push(muted("─".repeat(Math.min(width, 60))));
+    // Separator line - full width
+    lines.push(muted("─".repeat(width)));
 
     // Show messages - oldest at top, newest at bottom
     // Start with minimal height, grow up to MAX_VISIBLE_MESSAGES

@@ -9,7 +9,7 @@ import { LOG_FILE, logger } from "./logger.js";
 import { ResultQueue } from "./queue.js";
 import { renderCall, renderResult } from "./render.js";
 import { minionChangelogRenderer } from "./renderers/minion-changelog.js";
-import { minionSpawnRenderer } from "./renderers/minion-spawn.js";
+import { minionSpawnMessageRenderer } from "./renderers/minion-spawn.js";
 import { createStatusTracker } from "./status.js";
 import { EventBus } from "./subsessions/event-bus.js";
 import { SubsessionManager } from "./subsessions/manager.js";
@@ -17,7 +17,6 @@ import { getTempSessionPath } from "./subsessions/paths.js";
 import { HaltToolParams, halt } from "./tools/halt.js";
 import { ListAgentsParams, listAgents } from "./tools/list-agents.js";
 import {
-  ListMinionsParams,
   listMinions,
   ShowMinionParams,
   SteerMinionParams,
@@ -67,7 +66,8 @@ export default function (pi: ExtensionAPI): void {
 
   // Delegation conscience: Track tool calls and inject delegation reminder
   const TOOL_CALL_THRESHOLD = 8;
-  const HINT_INTERVAL = 60000 * 2;
+  // Send the delegation hint every 8 minutes, when it qualifies
+  const HINT_INTERVAL = 60000 * 8;
 
   let toolCallCount = 0;
   let _lastPromptText = "";
@@ -86,10 +86,11 @@ export default function (pi: ExtensionAPI): void {
     promptSnippet: "Spawn a minion for isolated task delegation",
     promptGuidelines: [
       'Use spawn for "foreground" task delegation. The tool blocks until the minion completes and returns its result.',
-      "To spawn multiple minions in parallel, emit multiple spawn calls in a single response. All results are returned together when all minions complete.",
+      "To spawn multiple minions in parallel, use the `tasks` array parameter with multiple task descriptors. Each task can specify `task`, optional `agent`, and optional `model`.",
+      "For single task delegation, use the `task` parameter directly/",
       "For fire-and-forget delegation where you do not need the result immediately, use spawn_bg instead.",
-      "Omit the agent parameter to spawn an ephemeral minion with default capabilities.",
       "Use list_agents to discover available named agents before spawning by name.",
+      "Omit the agent parameter to spawn an ephemeral minion with default capabilities.",
       "When a spawn result contains [USER ACTION] and mentions background, the user used /minions bg to move the minion. This is intentional, not an error. Acknowledge briefly and continue.",
       "When a spawn result says [HALTED], the user intentionally stopped the minion. Do NOT retry, re-spawn, or ask about it. Acknowledge and move on.",
     ],
@@ -149,7 +150,7 @@ export default function (pi: ExtensionAPI): void {
     label: "List Minions",
     description: "List available agent types that can be spawned as minions.",
     promptSnippet: "List available minion types",
-    parameters: ListMinionsParams,
+    parameters: ListAgentsParams,
     execute: listMinions(),
   });
 
@@ -163,7 +164,7 @@ export default function (pi: ExtensionAPI): void {
 
   // Register custom message renderers
   logger.debug("extension", "registering-renderers");
-  pi.registerMessageRenderer("minion-spawn", minionSpawnRenderer);
+  pi.registerMessageRenderer("minion-spawn", minionSpawnMessageRenderer);
   pi.registerMessageRenderer("minion-changelog", minionChangelogRenderer);
   logger.debug("extension", "renderers-registered");
 

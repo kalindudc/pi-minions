@@ -7,6 +7,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { minionSpawnRenderer } from "./renderers/minion-spawn.js";
 import type { SpawnToolDetails } from "./tools/spawn.js";
 import type { UsageStats } from "./types.js";
+import { emptyUsage } from "./types.js";
 
 // Formatting helpers
 
@@ -52,20 +53,29 @@ export function formatUsage(usage: UsageStats, model?: string): string {
   if (usage.contextTokens) parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
   if (model) parts.push(model);
 
-  return parts.join(" ");
+  return parts.join("  ");
 }
 
 // TUI render functions
 
 export function renderCall(args: Record<string, unknown>, theme: Theme, _ctx: unknown): Text {
-  const agentName = args.agent ? String(args.agent) : undefined;
+  if (args.tasks && Array.isArray(args.tasks)) {
+    const n = args.tasks.length;
+
+    let text = theme.fg("toolTitle", theme.bold("spawn "));
+    text += theme.fg("accent", `[${n} minion${n !== 1 ? "s" : ""}]`);
+
+    return new Text(text, 0, 0);
+  }
+
   const task = String(args.task ?? "");
   const taskPreview = task.length > 60 ? `${task.slice(0, 60)}…` : task;
   const model = args.model ? ` [${args.model}]` : "";
 
-  const label = agentName ? theme.fg("accent", agentName) : theme.fg("muted", taskPreview);
-
-  const text = theme.fg("toolTitle", theme.bold("spawn ")) + label + theme.fg("dim", model);
+  const text =
+    theme.fg("toolTitle", theme.bold("spawn ")) +
+    theme.fg("muted", taskPreview) +
+    theme.fg("dim", model);
   return new Text(text, 0, 0);
 }
 
@@ -73,7 +83,14 @@ export function renderResult(
   result: AgentToolResult<SpawnToolDetails>,
   { expanded, isPartial }: ToolRenderResultOptions,
   theme: Theme,
-  ctx: { isError: boolean; state?: { cachedName?: string; cachedId?: string } },
+  ctx: {
+    isError: boolean;
+    state?: {
+      cachedName?: string;
+      cachedId?: string;
+      cachedMinions?: Array<{ name: string; id: string }>;
+    };
+  },
 ): Text {
   let details = result.details;
 
@@ -82,11 +99,33 @@ export function renderResult(
     if (ctx.state) {
       ctx.state.cachedName = details.name;
       ctx.state.cachedId = details.id;
+      if (details.isBatch && details.minions) {
+        ctx.state.cachedMinions = details.minions.map((m) => ({ name: m.name, id: m.id }));
+      }
     }
   }
 
-  // When details is missing (e.g., tool error), fall back to cached state
-  if (!details && ctx.state) {
+  // Batch fallback when details missing
+  if (!details && ctx.state?.cachedMinions) {
+    details = {
+      isBatch: true,
+      minions: ctx.state.cachedMinions.map((m) => ({
+        ...m,
+        status: ctx.isError ? "failed" : "completed",
+        usage: emptyUsage(),
+        finalOutput: "",
+        agentName: m.name,
+        task: "",
+      })),
+      status: ctx.isError ? "failed" : "completed",
+      usage: emptyUsage(),
+      finalOutput: "",
+      id: "",
+      name: "batch",
+      agentName: "batch",
+      task: "",
+    } as SpawnToolDetails;
+  } else if (!details && ctx.state) {
     const name = ctx.state.cachedName ?? "minion";
     const id = ctx.state.cachedId;
     // Reconstruct minimal details for rendering
@@ -96,15 +135,7 @@ export function renderResult(
       agentName: name,
       task: "",
       status: ctx.isError ? "failed" : "completed",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        cost: 0,
-        contextTokens: 0,
-        turns: 0,
-      },
+      usage: emptyUsage(),
       finalOutput: "",
       spinnerFrame: 0,
     } as SpawnToolDetails;
@@ -118,35 +149,47 @@ export function renderResult(
       agentName: "minion",
       task: "",
       status: ctx.isError ? "failed" : "completed",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        cost: 0,
-        contextTokens: 0,
-        turns: 0,
-      },
+      usage: emptyUsage(),
       finalOutput: "",
       spinnerFrame: 0,
     } as SpawnToolDetails;
   }
 
-  const rendered = minionSpawnRenderer(
-    {
-      role: "custom",
-      customType: "minion-spawn",
-      content: "",
-      display: true,
-      details,
-      timestamp: Date.now(),
-    },
-    { expanded },
-    theme,
-  );
+  const rendered = minionSpawnRenderer({ details }, { expanded }, theme);
 
-  if (rendered instanceof Text) {
-    return rendered;
+  if (!rendered) {
+    return new Text(theme.fg("error", "Failed to render spawn result"), 0, 0);
   }
-  return new Text(theme.fg("error", "Failed to render spawn result"), 0, 0);
+
+  // Compose final output from structured parts
+  const parts: string[] = [];
+  if (rendered.header) parts.push(rendered.header);
+  if (rendered.body) parts.push(rendered.body);
+
+  // Add footer with usage info for batch spawns
+  if (details.isBatch && details.minions) {
+    const model = details.minions[0].model;
+    const usage = {
+      turns: details.minions.reduce((sum, m) => sum + m.usage.turns, 0),
+      input: details.minions.reduce((sum, m) => sum + m.usage.input, 0),
+      output: details.minions.reduce((sum, m) => sum + m.usage.output, 0),
+      cost: details.minions.reduce((sum, m) => sum + m.usage.cost, 0),
+      contextTokens: details.minions.reduce((sum, m) => sum + m.usage.contextTokens, 0),
+      cacheRead: details.minions.reduce((sum, m) => sum + m.usage.cacheRead, 0),
+      cacheWrite: details.minions.reduce((sum, m) => sum + m.usage.cacheWrite, 0),
+    };
+
+    const usageText = formatUsage(usage, model);
+    if (usageText) {
+      // Right-align usage text (assuming 100 char terminal width)
+      const terminalWidth = 100;
+      const visibleLength = usageText.length; // Approximate visible length
+      const leftPadding = Math.max(2, terminalWidth - visibleLength - 10);
+      parts.push(" ".repeat(leftPadding) + theme.fg("muted", usageText));
+    }
+  } else if (rendered.footer) {
+    parts.push(rendered.footer);
+  }
+
+  return new Text(parts.join("\n"), 0, 0);
 }

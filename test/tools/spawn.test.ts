@@ -483,6 +483,311 @@ describe("usage — live banner updates while running", () => {
   });
 });
 
+// Batch spawn execution
+
+describe("batch spawn execution", () => {
+  it("single-item batch uses unified spawn path with isBatch flag", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const result = await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "single task" }] } as any,
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    expect(result.details?.isBatch).toBe(true);
+    expect(result.details?.minions).toHaveLength(1);
+    expect(vi.mocked(runMinionSession)).toHaveBeenCalledTimes(1);
+  });
+
+  it("multi-item batch creates batch with isBatch flag", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    vi.mocked(runMinionSession).mockImplementation(async (_config, task) => ({
+      exitCode: 0,
+      finalOutput: `completed: ${task}`,
+      usage: { ...emptyUsage(), turns: 1 },
+    }));
+
+    const result = await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "task1" }, { task: "task2" }, { task: "task3" }] } as any,
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    expect(result.details?.isBatch).toBe(true);
+    expect(result.details?.minions).toHaveLength(3);
+    expect(vi.mocked(runMinionSession)).toHaveBeenCalledTimes(3);
+  });
+
+  it("batch aggregates all minion outputs", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    vi.mocked(runMinionSession).mockImplementation(async (_config, task) => ({
+      exitCode: 0,
+      finalOutput: `output for ${task}`,
+      usage: { ...emptyUsage(), turns: 1 },
+    }));
+
+    const result = await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "alpha" }, { task: "beta" }] } as any,
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    const text = (result.content[0] as any).text;
+    expect(text).toContain("output for alpha");
+    expect(text).toContain("output for beta");
+  });
+
+  it("batch aggregates usage across all minions", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    let callCount = 0;
+
+    vi.mocked(runMinionSession).mockImplementation(async () => {
+      callCount++;
+      return {
+        exitCode: 0,
+        finalOutput: "done",
+        usage: {
+          input: 100 * callCount,
+          output: 50 * callCount,
+          cacheRead: 10 * callCount,
+          cacheWrite: 5 * callCount,
+          cost: 0.001 * callCount,
+          contextTokens: 150 * callCount,
+          turns: callCount,
+        },
+      };
+    });
+
+    const result = await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "t1" }, { task: "t2" }] } as any,
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    expect(result.details?.usage.input).toBe(300);
+    expect(result.details?.usage.output).toBe(150);
+    expect(result.details?.usage.cost).toBe(0.003);
+  });
+
+  it("batch fails if any minion fails", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    vi.mocked(runMinionSession)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        finalOutput: "success",
+        usage: emptyUsage(),
+      })
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        finalOutput: "failed",
+        usage: emptyUsage(),
+        error: "Something went wrong",
+      });
+
+    await expect(
+      spawn(tree, queue, pi, subsessionManager)(
+        "tc",
+        { tasks: [{ task: "t1" }, { task: "t2" }] } as any,
+        undefined,
+        undefined,
+        createCtx(),
+      ),
+    ).rejects.toThrow(/failed/);
+  });
+
+  it("batch reports failed minion names in error", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    vi.mocked(runMinionSession)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        finalOutput: "success",
+        usage: emptyUsage(),
+      })
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        finalOutput: "failed",
+        usage: emptyUsage(),
+        error: "Error",
+      });
+
+    try {
+      await spawn(tree, queue, pi, subsessionManager)(
+        "tc",
+        { tasks: [{ task: "t1" }, { task: "t2" }] } as any,
+        undefined,
+        undefined,
+        createCtx(),
+      );
+      expect.fail("should have thrown");
+    } catch (err: any) {
+      expect(err.message).toContain("Batch spawn failed");
+      expect(err.message).toMatch(/Failed minions: \w+/);
+    }
+  });
+
+  it("batch streams updates via onUpdate callback", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const updates: any[] = [];
+
+    vi.mocked(runMinionSession).mockImplementation(async (_config, _task, opts: any) => {
+      opts.onTextDelta?.("", "working...");
+      await new Promise((r) => setTimeout(r, 0));
+      return {
+        exitCode: 0,
+        finalOutput: "done",
+        usage: emptyUsage(),
+      };
+    });
+
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "t1" }, { task: "t2" }] } as any,
+      undefined,
+      (u: any) => updates.push(u),
+      createCtx(),
+    );
+
+    expect(updates.length).toBeGreaterThanOrEqual(2);
+    expect(updates.every((u) => u.details?.isBatch)).toBe(true);
+  });
+
+  it("batch adds all minions to tree", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    vi.mocked(runMinionSession).mockImplementation(async () => ({
+      exitCode: 0,
+      finalOutput: "done",
+      usage: emptyUsage(),
+    }));
+
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "t1" }, { task: "t2" }, { task: "t3" }] } as any,
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    const roots = tree.getRoots();
+    expect(roots).toHaveLength(3);
+    expect(roots.map((r) => r.task)).toContain("t1");
+    expect(roots.map((r) => r.task)).toContain("t2");
+    expect(roots.map((r) => r.task)).toContain("t3");
+  });
+
+  it("batch respects abort signal", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const controller = new AbortController();
+
+    vi.mocked(runMinionSession).mockImplementation(async (_config, _task, opts: any) => {
+      if (opts.signal?.aborted) {
+        throw new Error("Aborted");
+      }
+      await new Promise((r) => setTimeout(r, 100));
+      return {
+        exitCode: 0,
+        finalOutput: "done",
+        usage: emptyUsage(),
+      };
+    });
+
+    setTimeout(() => controller.abort(), 50);
+
+    const result = await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "t1" }, { task: "t2" }] } as any,
+      controller.signal,
+      undefined,
+      createCtx(),
+    );
+
+    expect(result.details?.isBatch).toBe(true);
+  });
+});
+
+describe("batch spawn with agents", () => {
+  it("resolves named agents in batch tasks", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    vi.mocked(runMinionSession).mockImplementation(async () => ({
+      exitCode: 0,
+      finalOutput: "done",
+      usage: emptyUsage(),
+    }));
+
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      {
+        tasks: [
+          { task: "t1", agent: "scout" },
+          { task: "t2", agent: "scout" },
+        ],
+      } as any,
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    expect(vi.mocked(runMinionSession)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "scout" }),
+      expect.any(String),
+      expect.anything(),
+    );
+  });
+
+  it("uses ephemeral agents when no agent specified", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    vi.mocked(runMinionSession).mockImplementation(async () => ({
+      exitCode: 0,
+      finalOutput: "done",
+      usage: emptyUsage(),
+    }));
+
+    await spawn(tree, queue, pi, subsessionManager)(
+      "tc",
+      { tasks: [{ task: "t1" }, { task: "t2" }] } as any,
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    expect(vi.mocked(runMinionSession)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(runMinionSession)).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "ephemeral" }),
+      expect.any(String),
+      expect.anything(),
+    );
+  });
+
+  it("throws if unknown agent in batch task", async () => {
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    await expect(
+      spawn(tree, queue, pi, subsessionManager)(
+        "tc",
+        { tasks: [{ task: "t1", agent: "unknown" }] } as any,
+        undefined,
+        undefined,
+        createCtx(),
+      ),
+    ).rejects.toThrow(/Agent "unknown" not found/);
+  });
+});
+
 // Model resolution in banner
 
 describe("model resolution in banner", () => {

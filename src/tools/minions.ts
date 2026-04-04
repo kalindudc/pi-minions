@@ -8,6 +8,7 @@ import type { SubsessionManager } from "../subsessions/manager.js";
 import { getMinionHistory } from "../subsessions/observability.js";
 import type { AgentTree } from "../tree.js";
 import type { AgentNode } from "../types.js";
+import type { ListAgentsParams } from "./list-agents.js";
 
 // Shared validation helpers
 
@@ -76,8 +77,7 @@ export async function executeSteering(
 
 // list_minions
 
-export const ListMinionsParams = Type.Object({});
-export type ListMinionsParams = Static<typeof ListMinionsParams>;
+export type ListMinionsParams = Static<typeof ListAgentsParams>;
 
 export function listMinions() {
   return async function execute(
@@ -153,9 +153,13 @@ export function buildShowMinionText(
 
   const lines: string[] = [];
   if (node) {
-    // Header with mode badge
+    // Header with mode badge and agent name
     const mode = node.detached ? "[bg]" : "[fg]";
-    lines.push(`${node.name} (${node.id}) ${mode}`);
+    const displayName =
+      node.agentName && node.agentName !== "ephemeral"
+        ? `${node.agentName} ${node.name}`
+        : node.name;
+    lines.push(`${displayName} (${node.id}) ${mode}`);
     lines.push(`  Status: ${node.status}`);
     lines.push(`  Task: ${node.task}`);
 

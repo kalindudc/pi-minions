@@ -15,13 +15,16 @@ graph LR
     index[index.ts<br/>entry point + registration]
 
     index --> tree[tree.ts<br/>AgentTree — UI state + hierarchy]
-    index --> subsessions[subsessions/<br/>SubsessionManager — file-based sessions]
+    index --> subsessions[subsessions/<br/>session lifecycle + event bus]
     index --> queue[queue.ts<br/>ResultQueue — background results]
     index --> spawn_core[spawn.ts<br/>runMinionSession — orchestrates sessions]
     index --> agents[agents.ts<br/>agent discovery + parsing]
     index --> minions_core[minions.ts<br/>names, IDs, default prompt]
-    index --> render[render.ts<br/>TUI rendering]
-    index --> logger[logger.ts<br/>structured debug logging]
+    index --> render[render.ts<br/>TUI tool rendering]
+    index --> renderers[renderers/<br/>message renderers]
+    index --> footer[footer.ts<br/>custom footer widget]
+    index --> status[status.ts<br/>status line hints]
+    index --> logger[logger.ts<br/>structured logging]
 
     index --> tools_spawn[tools/spawn.ts<br/>spawn + spawn_bg tools]
     index --> tools_halt[tools/halt.ts<br/>halt tool]
@@ -38,6 +41,7 @@ graph LR
     tools_spawn --> tree
     tools_spawn --> queue
     tools_spawn --> subsessions
+    tools_spawn --> event_bus
 
     tools_halt --> tree
     tools_halt --> subsessions
@@ -45,22 +49,29 @@ graph LR
     tools_minions --> subsessions
     tools_minions --> queue
     tools_agents --> agents
+
+    subsessions --> event_bus[event-bus.ts<br/>detach signals]
 ```
 
 | Module | Purpose |
 |--------|---------|
 | `index.ts` | Extension entry point — creates shared state, registers tools and commands, wires event listeners |
 | `tree.ts` | `AgentTree` — UI state (status, usage, activity, hierarchy) with change notifications |
-| `subsessions/` | `SubsessionManager` — file-based session lifecycle, metadata persistence, AgentSession access |
-| `queue.ts` | `ResultQueue` — holds completed background results for auto-delivery to the parent |
-| `spawn.ts` | `runMinionSession()` — orchestrates between AgentTree (UI) and SubsessionManager (sessions) |
+| `subsessions/` | Session lifecycle, metadata persistence, AgentSession access |
+| `subsessions/manager.ts` | `SubsessionManager` — creates and tracks minion sessions |
+| `subsessions/event-bus.ts` | `EventBus` — typed event bus for detach signals |
+| `queue.ts` | `ResultQueue` — holds completed background results for auto-delivery |
+| `spawn.ts` | `runMinionSession()` — orchestrates sessions between AgentTree and SubsessionManager |
 | `minions.ts` | Minion name pool, ID generation, default ephemeral prompt template |
 | `agents.ts` | Agent discovery from global and project directories, YAML frontmatter parsing |
-| `render.ts` | TUI rendering for spawn tool calls (progress bars, streaming output) and results |
-| `logger.ts` | Structured file-based logging with scoped debug/info/warn/error levels |
-| `types.ts` | Shared TypeScript types (`AgentConfig`, `AgentNode`, `QueuedResult`, `SpawnResult`, `UsageStats`) |
-| `tools/*.ts` | Tool implementations (LLM-callable functions with typed schemas) |
-| `commands/*.ts` | Command handlers (user-initiated `/spawn`, `/minions`, `/halt`) |
+| `render.ts` | TUI rendering for spawn tool calls (header, progress, footer) |
+| `renderers/` | Message renderers for spawn banners and changelogs |
+| `footer.ts` | Custom footer widget with minion counts and usage |
+| `status.ts` | Status line hints and background minion count |
+| `logger.ts` | Structured file-based logging with scoped levels |
+| `types.ts` | Shared TypeScript types |
+| `tools/*.ts` | LLM-callable tool implementations |
+| `commands/*.ts` | User-initiated command handlers |
 
 ## Data flow
 
@@ -72,20 +83,23 @@ sequenceDiagram
     participant spawn tool
     participant agents
     participant AgentTree
+    participant EventBus
     participant runMinionSession
     participant pi session
 
-    User/LLM->>spawn tool: spawn({ task, agent? })
+    User/LLM->>spawn tool: spawn({ task, agent? }) or spawn({ tasks: [...] })
     spawn tool->>agents: discoverAgents()
     agents-->>spawn tool: AgentConfig
-    spawn tool->>AgentTree: add(id, name, task)
+    spawn tool->>AgentTree: add(id, name, task, parentId?, agentName?)
+    spawn tool->>EventBus: subscribe(detach)
     spawn tool->>runMinionSession: run session
     runMinionSession->>pi session: createAgentSession()
     pi session->>pi session: session.prompt(task)
 
     loop streaming
         pi session-->>spawn tool: events (tool activity, text deltas)
-        spawn tool-->>User/LLM: progress updates
+        spawn tool->>AgentTree: updateActivity(), updateUsage()
+        spawn tool-->>User/LLM: onUpdate() → progress banner
     end
 
     pi session-->>runMinionSession: session completes
@@ -94,7 +108,9 @@ sequenceDiagram
     spawn tool-->>User/LLM: { exitCode, finalOutput, usage }
 ```
 
-The parent **blocks** until the minion completes. If the user runs `/minions bg <name>`, the spawn tool detaches: it disconnects the parent's abort signal, wires the result to the queue instead, and returns immediately. The same session continues — no kill/respawn.
+The parent **blocks** until all minions complete. For batch spawns, all minions run in parallel and aggregate into a single result.
+
+**Detach flow:** When the user runs `/minions bg <name>`, the command emits a detach event via `EventBus`. The spawn tool races `runMinionSession()` against this event — if detach fires first, it returns immediately with "sent to background", wires the result to `ResultQueue`, and the session continues independently.
 
 ### Background spawn
 
@@ -105,21 +121,22 @@ sequenceDiagram
     participant AgentTree
     participant ResultQueue
     participant runMinionSession
-    participant pi.sendMessage
+    participant pi
 
     LLM->>spawn_bg tool: spawn_bg({ task, agent? })
     spawn_bg tool->>AgentTree: add(id, name, task)
+    spawn_bg tool->>AgentTree: markDetached(id)
     spawn_bg tool->>runMinionSession: run session (fire-and-forget)
     spawn_bg tool-->>LLM: { id, name, status: "running" }
 
     Note over runMinionSession: session runs independently
 
-    runMinionSession-->>ResultQueue: add(QueuedResult)
-    ResultQueue->>pi.sendMessage: deliverAs: "nextTurn"
-    pi.sendMessage-->>LLM: result auto-delivered
+    runMinionSession-->>ResultQueue: add(result)
+    ResultQueue->>pi: sendUserMessage({ deliverAs: "followUp" })
+    pi-->>LLM: result auto-delivered
 ```
 
-The tool returns immediately. The session runs in the background and its result is auto-delivered to the parent on the next turn via `pi.sendMessage({ deliverAs: "nextTurn" })`.
+The tool returns immediately. The minion is marked `detached` in the tree so the status tracker counts it as background. The session runs independently and its result is auto-delivered via `pi.sendUserMessage()` when complete.
 
 ## Key concepts
 
@@ -192,6 +209,23 @@ We maintain two state managers with clear separation:
 
 `spawn.ts` is the **only** module that coordinates both — it creates the session via SubsessionManager, then wires callbacks to update AgentTree for UI notifications.
 
+### EventBus vs AgentTree
+
+Two complementary notification systems for different use cases:
+
+| Concern | EventBus | AgentTree |
+|---------|----------|-----------|
+| **Pattern** | Push-based events | Pull-based state + change notifications |
+| **Scope** | Cross-module signals (detach, progress) | Minion hierarchy and status |
+| **Subscribers** | One-shot handlers | Long-lived listeners (UI widgets) |
+| **Persistence** | Ephemeral (fire and forget) | In-memory state until minion removed |
+
+**EventBus** handles discrete signals like detach requests: `/minions bg <id>` emits a `detach` event that the spawn tool catches via `Promise.race()`. This decouples commands from spawn implementation — the command does not need a reference to the running spawn promise.
+
+**AgentTree** holds authoritative UI state (status, usage, activity). Widgets like the footer and observability dashboard subscribe via `onChange()` and re-render when state updates. The tree aggregates usage across all minions for the footer display and tracks parent-child relationships for hierarchy views.
+
+Most operations touch both: a detach starts as an EventBus signal, then updates AgentTree's `detached` flag so the UI reflects the new state.
+
 ### Abort throws error
 
 The `halt` tool throws an error (rather than returning a value) so pi renders a red `[HALTED]` banner in the UI. The system prompt reinforces "do NOT retry" — this prevents the LLM from interpreting halt as a transient failure and re-spawning the minion.
@@ -202,10 +236,10 @@ Background results are auto-delivered via `pi.sendMessage({ deliverAs: "nextTurn
 
 ### Live detach mechanism
 
-Foreground spawn races `runMinionSession()` against a detach promise:
+Foreground spawn races `runMinionSession()` against a detach signal via `EventBus`:
 
 - **Normal flow:** session completes → return result to caller
-- **Detach flow:** user runs `/minions bg` → disconnect parent abort signal → wire result to queue → return "sent to background"
+- **Detach flow:** user runs `/minions bg` → `EventBus.emit(id)` → spawn catches signal → wire result to queue → return "sent to background"
 
 The key insight is that the **same session continues** — there's no kill/respawn. The detach just redirects where the result goes.
 

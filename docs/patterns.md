@@ -21,20 +21,32 @@
 
 **Problem:** You have multiple independent tasks and don't want to run them sequentially.
 
-**Solution:** Spawn multiple background minions. They run concurrently and deliver results as they finish.
+**Solution 1: Batch spawn (foreground)**
+
+Use the `tasks` array to spawn multiple minions under one render block. All complete before the parent continues.
+
+```javascript
+spawn({
+  tasks: [
+    { task: "Analyze auth module" },
+    { task: "Analyze payments module" },
+    { task: "Analyze notifications module" }
+  ]
+})
+```
+
+**Solution 2: Multiple background spawns**
+
+For fire-and-forget work, spawn background minions:
 
 ```bash
 /spawn --bg Research React 19 server components
 /spawn --bg Research Next.js 15 app router changes
-/spawn --bg Research Vercel edge function best practices
 ```
 
-Wall-clock time equals the slowest task, not the sum. Results arrive out-of-order as each minion finishes — they're auto-delivered to the parent on the next turn.
-
-**When to use:** Independent research, parallel file processing, running tests while continuing other work.
-
-> [!TIP]
-> Limit to 2-3 parallel minions. More than that increases token usage without proportional benefit.
+**When to use:**
+- Batch spawn: Related analysis tasks where you need all results before continuing
+- Background spawns: Fire-and-forget research, long-running tests
 
 ---
 

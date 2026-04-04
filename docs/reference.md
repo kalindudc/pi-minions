@@ -25,9 +25,14 @@
 
 Delegate tasks to foreground or background minions.
 
-**Schema:**
+**Schema (single task):**
 ```typescript
 { task: string; agent?: string; model?: string }
+```
+
+**Schema (batch — multiple minions):**
+```typescript
+{ tasks: Array<{ task: string; agent?: string; model?: string }> }
 ```
 
 | Aspect | `spawn` (foreground) | `spawn_bg` (background) |
@@ -36,6 +41,7 @@ Delegate tasks to foreground or background minions.
 | **Result delivery** | Tool call return value | Auto-queued, delivered next turn |
 | **Use when** | Need result to proceed | Long-running, parallel work |
 | **Detachable?** | Yes, via `/minions bg` | N/A (already detached) |
+| **Batch mode?** | Yes, via `tasks` array | No |
 
 **Returns:**
 ```typescript
@@ -47,6 +53,7 @@ Delegate tasks to foreground or background minions.
 ```
 
 **Key behaviors:**
+- Use `tasks` array to spawn multiple minions in parallel under one render block
 - Creates an isolated in-process session (see [Architecture — In-process sessions](architecture.md#in-process-sessions-over-child-processes))
 - Streams progress via `session.subscribe()`
 - Abortable via `halt` tool or `/halt` command
