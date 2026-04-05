@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-04-05
+
+- fix: incorrect terminal width calculations on the batch minion renderer
+
 ## [0.10.1] - 2026-04-05
 
 - fix: missing rendering signal for a single foreground minion when it is sent to the background
