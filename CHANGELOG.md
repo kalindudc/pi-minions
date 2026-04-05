@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-05
+
+- feat: add configurable defaults for minion behavior with type-safe schema
+- feat: support custom minion names, delegation hints, display options, and spinner frames
+- feat: load settings from pi's standard config files with PI_CODING_AGENT_DIR support
+- test: add comprehensive unit tests and extract shared mock context helper
+- docs: document all configuration options with examples
+
 ## [0.10.2] - 2026-04-05
 
 - fix: incorrect terminal width calculations on the batch minion renderer

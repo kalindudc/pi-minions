@@ -1,6 +1,6 @@
 {
   "name": "pi-minions",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "Minimal recursive subagent orchestration for pi. No bundled agents, no opinions.",
   "type": "module",
   "keywords": [
