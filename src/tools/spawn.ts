@@ -93,6 +93,7 @@ export interface SpawnToolDetails {
   finalOutput: string;
   activity?: string;
   spinnerFrame?: number;
+  detached?: boolean;
   isBatch?: boolean;
   minions?: BatchMinionItem[];
 }
