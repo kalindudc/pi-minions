@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-04-05
+
+- fix: missing rendering signal for a single foreground minion when it is sent to the background
+
 ## [0.10.0] - 2026-04-05
 
 - feat: add automated GitHub releases flow
