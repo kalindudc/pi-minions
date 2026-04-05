@@ -156,12 +156,6 @@ describe("renderCall", () => {
     expect(text).toContain("[3 minions]");
   });
 
-  it("renders singular for single-item batch", () => {
-    const result = renderCall({ tasks: [{ task: "t1" }] }, theme, {});
-    const text = result.render(100).join("\n");
-    expect(text).toContain("[1 minion]");
-  });
-
   it("truncates long task previews", () => {
     const longTask = "a".repeat(100);
     const result = renderCall({ task: longTask }, theme, {});

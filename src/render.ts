@@ -59,7 +59,7 @@ export function formatUsage(usage: UsageStats, model?: string): string {
 // TUI render functions
 
 export function renderCall(args: Record<string, unknown>, theme: Theme, _ctx: unknown): Text {
-  if (args.tasks && Array.isArray(args.tasks)) {
+  if (args.tasks && Array.isArray(args.tasks) && args.tasks.length > 1) {
     const n = args.tasks.length;
 
     let text = theme.fg("toolTitle", theme.bold("spawn "));
@@ -68,8 +68,13 @@ export function renderCall(args: Record<string, unknown>, theme: Theme, _ctx: un
     return new Text(text, 0, 0);
   }
 
-  const task = String(args.task ?? "");
-  const taskPreview = task.length > 60 ? `${task.slice(0, 60)}…` : task;
+  let task = String(args.task ?? "");
+  if (args.tasks && Array.isArray(args.tasks) && args.tasks.length === 1) {
+    task = String(args.tasks[0]);
+  }
+
+  const firstTaskLine = task.split("\n")[0];
+  const taskPreview = firstTaskLine.length > 60 ? `${firstTaskLine.slice(0, 60)}…` : firstTaskLine;
   const model = args.model ? ` [${args.model}]` : "";
 
   const text =
@@ -167,7 +172,7 @@ export function renderResult(
   if (rendered.body) parts.push(rendered.body);
 
   // Add footer with usage info for batch spawns
-  if (details.isBatch && details.minions) {
+  if (details.isBatch && details.minions && details.minions.length > 1) {
     const model = details.minions[0].model;
     const usage = {
       turns: details.minions.reduce((sum, m) => sum + m.usage.turns, 0),

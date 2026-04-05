@@ -92,9 +92,31 @@ export function renderSingleMinion(
   options: MessageRenderOptions,
   theme: Theme,
 ): SpawnRenderResult {
-  const isRunning = data.status === "running";
-  const isAborted = data.status === "aborted";
-  const isError = data.status === "failed";
+  let name = data.name;
+  let agentName = data.agentName;
+  let status = data.status;
+  let usage = data.usage;
+  let finalOutput = data.finalOutput;
+  let activity = data.activity;
+  let spinnerFrame = data.spinnerFrame;
+  let model = data.model;
+  let id = data.id;
+  if (data.minions && data.minions.length > 0) {
+    // If we have batch minions but only one, render it as a single minion for better detail
+    name = data.minions[0].name;
+    agentName = data.minions[0].agentName;
+    status = data.minions[0].status;
+    usage = data.minions[0].usage;
+    finalOutput = data.minions[0].finalOutput;
+    activity = data.minions[0].activity;
+    spinnerFrame = data.minions[0].spinnerFrame;
+    model = data.minions[0].model;
+    id = data.minions[0].id;
+  }
+
+  const isRunning = status === "running";
+  const isAborted = status === "aborted";
+  const isError = status === "failed";
 
   // Status icon and color
   let icon: string;
@@ -106,7 +128,7 @@ export function renderSingleMinion(
     icon = "✗";
     statusColor = "error";
   } else if (isRunning) {
-    const frame = SPINNER[(data.spinnerFrame ?? 0) % SPINNER.length];
+    const frame = SPINNER[(spinnerFrame ?? 0) % SPINNER.length];
     icon = frame;
     statusColor = "accent";
   } else {
@@ -118,30 +140,30 @@ export function renderSingleMinion(
   let header = `${theme.fg(statusColor, icon)}`;
 
   // Add agent type if it's not the default ephemeral minion
-  if (data.agentName && data.agentName !== "ephemeral") {
-    header += ` ${theme.fg("success", data.agentName)}`;
+  if (agentName && agentName !== "ephemeral") {
+    header += ` ${theme.fg("success", agentName)}`;
   }
 
-  header += ` ${theme.fg(statusColor, data.name)}`;
-  if (data.id) {
-    header += ` ${theme.fg("dim", `(${data.id})`)}`;
+  header += ` ${theme.fg(statusColor, name)}`;
+  if (id) {
+    header += ` ${theme.fg("dim", `(${id})`)}`;
   }
 
   // Add usage
-  const usage = formatUsage(data.usage, data.model);
-  if (usage) {
-    header += `  ${theme.fg("muted", `—  ${usage}`)}`;
+  const usageText = formatUsage(usage, model);
+  if (usageText) {
+    header += `  ${theme.fg("muted", `—  ${usageText}`)}`;
   }
 
   // Activity line (if running)
   let body = "";
-  if (isRunning && data.activity) {
-    body = `${theme.fg("dim", `  ╰  ${data.activity ?? "thinking…"}`)}\n${theme.fg("dim", `  │`)}`;
+  if (isRunning && activity) {
+    body = `${theme.fg("dim", `  │`)}\n${theme.fg("dim", `  ╰  ${activity ?? "thinking…"}`)}`;
   }
 
   // Expanded output preview
-  if (options.expanded && data.finalOutput) {
-    const preview = data.finalOutput.split("\n").slice(0, 20).join("\n");
+  if (options.expanded && finalOutput) {
+    const preview = finalOutput.split("\n").slice(0, 20).join("\n");
     body += (body ? "\n" : "") + theme.fg("toolOutput", preview);
   }
 
@@ -161,7 +183,7 @@ export function minionSpawnRenderer(
     return undefined;
   }
 
-  if (data.isBatch && data.minions) {
+  if (data.isBatch && data.minions && data.minions.length > 1) {
     return renderBatchMinions(data, options, theme);
   }
 
