@@ -152,4 +152,4 @@ jobs:
         run: npm ci
 
       - name: Publish to NPM
-        run: npm publish --access public
+        run: npx npm@11.5.1 publish --provenance --access public
