@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-06
+
+- feat: deliver background minion results via custom message renderer with tool-style rendering
+
 ## [0.11.0] - 2026-04-05
 
 - feat: add configurable defaults for minion behavior with type-safe schema
