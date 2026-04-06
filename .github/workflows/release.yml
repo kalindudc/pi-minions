@@ -122,8 +122,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release
+      - name: Check if release exists
         if: steps.check-tag.outputs.skip != 'true'
+        id: check-release
+        run: |
+          TAG="${{ steps.check-tag.outputs.tag }}"
+          if gh release view "$TAG" --json url 2>/dev/null | grep -q "url"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release $TAG already exists, skipping creation"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.check-tag.outputs.skip != 'true' && steps.check-release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.check-tag.outputs.tag }}
@@ -142,6 +156,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
