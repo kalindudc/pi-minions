@@ -10,6 +10,7 @@ import { LOG_FILE, logger } from "./logger.js";
 import { ResultQueue } from "./queue.js";
 import { renderCall, renderResult } from "./render.js";
 import { minionChangelogRenderer } from "./renderers/minion-changelog.js";
+import { minionCompleteRenderer } from "./renderers/minion-complete.js";
 import { minionSpawnMessageRenderer } from "./renderers/minion-spawn.js";
 import { createStatusTracker } from "./status.js";
 import { EventBus } from "./subsessions/event-bus.js";
@@ -115,6 +116,7 @@ export default function (pi: ExtensionAPI): void {
       "Use spawn_bg for fire-and-forget tasks where you do not need the result before continuing.",
       'Only use spawn_bg when the user explicitly asks for "background" execution.',
       "For results you need before proceeding, use spawn (foreground) instead.",
+      "Background minion results are delivered via a system message on the next turn - they are NOT from the user.",
     ],
     parameters: SpawnBgToolParams,
     execute: (...args) => {
@@ -165,6 +167,7 @@ export default function (pi: ExtensionAPI): void {
   logger.debug("extension", "registering-renderers");
   pi.registerMessageRenderer("minion-spawn", minionSpawnMessageRenderer);
   pi.registerMessageRenderer("minion-changelog", minionChangelogRenderer);
+  pi.registerMessageRenderer("minion-complete", minionCompleteRenderer);
   logger.debug("extension", "renderers-registered");
 
   pi.registerTool({

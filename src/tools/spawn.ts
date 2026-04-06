@@ -123,7 +123,93 @@ function resolveConfig(
   return defaultMinionTemplate(name, { model: params.model });
 }
 
-// Handle background completion
+// Process background minion completion - async function that handles the session promise
+async function processBgCompletion(
+  sessionPromise: Promise<import("../types.js").SpawnResult>,
+  id: string,
+  name: string,
+  task: string,
+  startTime: number,
+  tree: AgentTree,
+  queue: ResultQueue,
+  pi: ExtensionAPI,
+): Promise<void> {
+  let result: import("../types.js").SpawnResult;
+
+  try {
+    result = await sessionPromise;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("spawn:bg-completion", "sessionPromise-rejected", { id, name, error: msg });
+    tree.updateStatus(id, "failed", 1, msg);
+    logger.error("spawn:tool", "bg-failed", { id, name, error: msg });
+    return;
+  }
+
+  logger.debug("spawn:bg-completion", "sessionPromise-resolved", {
+    id,
+    name,
+    exitCode: result.exitCode,
+    hasOutput: !!result.finalOutput,
+    outputLength: result.finalOutput?.length,
+    outputPreview: result.finalOutput?.slice(0, 200),
+    hasError: !!result.error,
+  });
+
+  const status = result.exitCode === 0 ? "completed" : "failed";
+  tree.updateStatus(id, status, result.exitCode, result.error);
+  tree.updateUsage(id, result.usage);
+  logger.debug("spawn:bg-completion", "tree-updated", { id, status });
+
+  queue.add({
+    id,
+    name,
+    task,
+    output: result.finalOutput,
+    usage: result.usage,
+    status: "pending",
+    completedAt: Date.now(),
+    duration: Date.now() - startTime,
+    exitCode: result.exitCode,
+    error: result.error,
+  });
+  logger.debug("spawn:bg-completion", "queue-add-called", { id });
+
+  // Content visible to LLM - brief system indicator that parent should react
+  const content = `[Background minion "${name}" completed - exit code: ${result.exitCode}]`;
+
+  try {
+    const messagePayload = {
+      customType: "minion-complete" as const,
+      content,
+      display: true,
+      details: {
+        id,
+        name,
+        task,
+        exitCode: result.exitCode,
+        error: result.error,
+        duration: Date.now() - startTime,
+        output: result.finalOutput, // Full output for renderer
+      },
+    };
+
+    pi.sendMessage(messagePayload, { triggerTurn: true });
+    logger.debug("spawn:bg-completion", "sendMessage-called", { id, name, triggerTurn: true });
+  } catch (sendErr) {
+    const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+    logger.error("spawn:bg-completion", "sendMessage-failed", { id, error: sendMsg });
+  }
+
+  queue.accept(id);
+  logger.info("spawn:tool", "bg-completed", {
+    id,
+    name,
+    exitCode: result.exitCode,
+  });
+}
+
+// Handle background completion - fire-and-forget wrapper
 function handleBgCompletion(
   sessionPromise: Promise<import("../types.js").SpawnResult>,
   id: string,
@@ -134,47 +220,9 @@ function handleBgCompletion(
   queue: ResultQueue,
   pi: ExtensionAPI,
 ): void {
-  void sessionPromise
-    .then((result) => {
-      const status = result.exitCode === 0 ? "completed" : "failed";
-      tree.updateStatus(id, status, result.exitCode, result.error);
-      tree.updateUsage(id, result.usage);
-
-      queue.add({
-        id,
-        name,
-        task,
-        output: result.finalOutput,
-        usage: result.usage,
-        status: "pending",
-        completedAt: Date.now(),
-        duration: Date.now() - startTime,
-        exitCode: result.exitCode,
-        error: result.error,
-      });
-
-      const messageContent = [
-        `Background minion "${name}" (${id}) completed.`,
-        `Task: ${task}`,
-        `Exit code: ${result.exitCode}`,
-        ...(result.error ? [`Error: ${result.error}`] : []),
-        ``,
-        result.finalOutput,
-      ].join("\n");
-
-      pi.sendUserMessage(messageContent, { deliverAs: "followUp" });
-      queue.accept(id);
-      logger.info("spawn:tool", "bg-completed", {
-        id,
-        name,
-        exitCode: result.exitCode,
-      });
-    })
-    .catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      tree.updateStatus(id, "failed", 1, msg);
-      logger.error("spawn:tool", "bg-failed", { id, name, error: msg });
-    });
+  logger.debug("spawn:bg-completion", "handleBgCompletion-called", { id, name, task });
+  // Fire-and-forget: don't await the promise, errors are handled internally
+  processBgCompletion(sessionPromise, id, name, task, startTime, tree, queue, pi);
 }
 
 // Create shared event bus for detach signals
@@ -776,7 +824,14 @@ export function spawnBg(
       },
     });
 
+    logger.debug("spawn:bg", "calling-handleBgCompletion", {
+      id,
+      name,
+      hasPi: !!pi,
+      hasSendMessage: !!pi.sendMessage,
+    });
     handleBgCompletion(sessionPromise, id, name, params.task, startTime, tree, queue, pi);
+    logger.debug("spawn:bg", "handleBgCompletion-returned", { id });
 
     const result: AgentToolResult<SpawnToolDetails> = {
       content: [

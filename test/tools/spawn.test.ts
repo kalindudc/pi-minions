@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResultQueue } from "../../src/queue.js";
+import { minionCompleteRenderer } from "../../src/renderers/minion-complete.js";
 import { SubsessionManager } from "../../src/subsessions/manager.js";
 import { AgentTree } from "../../src/tree.js";
 
@@ -788,6 +789,254 @@ describe("batch spawn with agents", () => {
   });
 });
 
+// spawnBg — completion result delivery
+
+describe("spawnBg — completion result delivery", () => {
+  it("calls pi.sendMessage with customType 'minion-complete' when background minion succeeds", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 0,
+      finalOutput: "Task completed successfully",
+      usage: { ...emptyUsage(), turns: 1 },
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "background task" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    // Wait for async completion
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Assert sendMessage was called (not sendUserMessage)
+    expect(pi.sendMessage).toHaveBeenCalled();
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+
+    // Assert correct customType
+    const sendMessageCall = vi.mocked(pi.sendMessage).mock.calls[0];
+    expect(sendMessageCall?.[0]).toMatchObject({
+      customType: "minion-complete",
+      display: true,
+    });
+
+    // Assert details contain expected fields
+    const messageData = sendMessageCall?.[0] as any;
+    expect(messageData.details).toMatchObject({
+      exitCode: 0,
+      task: "background task",
+    });
+    expect(messageData.details.id).toBeDefined();
+    expect(messageData.details.name).toBeDefined();
+    expect(messageData.details.duration).toBeGreaterThanOrEqual(0);
+  });
+
+  it("calls pi.sendMessage with error details when background minion fails", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 1,
+      finalOutput: "Error output",
+      usage: emptyUsage(),
+      error: "Something went wrong",
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "failing task" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const sendMessageCall = vi.mocked(pi.sendMessage).mock.calls[0];
+    expect(sendMessageCall?.[0]).toMatchObject({
+      customType: "minion-complete",
+    });
+
+    const messageData = sendMessageCall?.[0] as any;
+    expect(messageData.details).toMatchObject({
+      exitCode: 1,
+      error: "Something went wrong",
+      task: "failing task",
+    });
+  });
+
+  it("does NOT call pi.sendUserMessage when background minion completes", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 0,
+      finalOutput: "Done",
+      usage: emptyUsage(),
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "simple task" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("still adds result to queue and calls queue.accept after sendMessage", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 0,
+      finalOutput: "Queued result",
+      usage: { ...emptyUsage(), input: 100, output: 50 },
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const addSpy = vi.spyOn(queue, "add");
+    const acceptSpy = vi.spyOn(queue, "accept");
+
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "queued task" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Verify queue.add was called with result data
+    expect(addSpy).toHaveBeenCalled();
+    const queuedResult = addSpy.mock.calls[0]?.[0];
+    expect(queuedResult).toMatchObject({
+      task: "queued task",
+      output: "Queued result",
+      status: "pending",
+      exitCode: 0,
+    });
+
+    // Verify queue.accept was called
+    expect(acceptSpy).toHaveBeenCalled();
+
+    // Verify both sendMessage and queue operations happened
+    expect(pi.sendMessage).toHaveBeenCalled();
+  });
+
+  it("includes triggerTurn: true and deliverAs: 'nextTurn' in sendMessage options", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 0,
+      finalOutput: "Done",
+      usage: emptyUsage(),
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "options test" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Verify message structure - brief system content, output in details
+    const sendMessageCall = vi.mocked(pi.sendMessage).mock.calls[0];
+    expect(sendMessageCall?.[0]).toMatchObject({
+      customType: "minion-complete",
+      display: true,
+    });
+    // Content should indicate background completion, not user message
+    expect(sendMessageCall?.[0].content).toContain("Background minion");
+    expect(sendMessageCall?.[0].content).toContain("completed");
+    // triggerTurn should be true so parent reacts
+    expect(sendMessageCall?.[1]).toMatchObject({ triggerTurn: true });
+  });
+
+  it("sendMessage payload has all required fields for renderer", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 0,
+      finalOutput: "Test output",
+      usage: { ...emptyUsage(), input: 100, output: 50 },
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "renderer test task" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const sendMessageCall = vi.mocked(pi.sendMessage).mock.calls[0];
+    const payload = sendMessageCall?.[0] as any;
+
+    // Verify all fields required by renderer are present
+    expect(payload).toHaveProperty("customType", "minion-complete");
+    expect(payload).toHaveProperty("display", true);
+    expect(payload).toHaveProperty("details");
+
+    // content should be brief system message, not raw output
+    expect(payload.content).toContain("Background minion");
+    expect(payload.content).toContain("completed");
+    expect(payload.content).toContain("exit code: 0");
+
+    // Verify details has all required fields including output for renderer
+    const details = payload.details;
+    expect(details).toHaveProperty("id");
+    expect(details).toHaveProperty("name");
+    expect(details).toHaveProperty("task", "renderer test task");
+    expect(details).toHaveProperty("exitCode", 0);
+    expect(details).toHaveProperty("duration");
+    expect(details).toHaveProperty("output", "Test output"); // output in details for renderer
+    expect(details.id).toBeTruthy();
+    expect(details.name).toBeTruthy();
+  });
+
+  it("handles sendMessage throwing an error gracefully", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 0,
+      finalOutput: "Done",
+      usage: emptyUsage(),
+    });
+
+    const tree = new AgentTree();
+    const queue = new ResultQueue();
+    const addSpy = vi.spyOn(queue, "add");
+    const acceptSpy = vi.spyOn(queue, "accept");
+    const pi = { sendUserMessage: vi.fn(), sendMessage: vi.fn() } as any;
+    const subsessionManager = new SubsessionManager("/tmp", "/tmp/parent.jsonl");
+
+    // Make sendMessage throw
+    vi.mocked(pi.sendMessage).mockImplementation(() => {
+      throw new Error("sendMessage failed");
+    });
+
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "error test" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Verify queue operations still happened even if sendMessage failed
+    expect(addSpy).toHaveBeenCalled();
+    expect(acceptSpy).toHaveBeenCalled();
+
+    addSpy.mockRestore();
+    acceptSpy.mockRestore();
+  });
+});
+
 // Model resolution in banner
 
 describe("model resolution in banner", () => {
@@ -862,5 +1111,80 @@ describe("model resolution in banner", () => {
       createCtx(),
     );
     expect(updates[0]?.details?.model).toBeUndefined();
+  });
+});
+
+// Integration test for renderer
+describe("spawnBg — integration with renderer", () => {
+  it("renderer can render the message payload sent by spawnBg", async () => {
+    vi.mocked(runMinionSession).mockResolvedValue({
+      exitCode: 0,
+      finalOutput: "Integration test output",
+      usage: { ...emptyUsage(), turns: 1 },
+    });
+
+    const { tree, queue, pi, subsessionManager } = createDeps();
+
+    // Capture the actual payload sent to sendMessage
+    let capturedPayload: any;
+    vi.mocked(pi.sendMessage).mockImplementation((payload: any) => {
+      capturedPayload = payload;
+    });
+
+    await spawnBg(tree, queue, pi, subsessionManager)(
+      "tc",
+      { task: "integration test task" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Verify sendMessage was called
+    expect(pi.sendMessage).toHaveBeenCalled();
+    expect(capturedPayload).toBeDefined();
+
+    // Now verify the renderer can render this payload
+    const mockTheme = {
+      fg: (_color: string, text: string) => text,
+    };
+
+    const renderResult = minionCompleteRenderer(
+      capturedPayload,
+      { expanded: false },
+      mockTheme as any,
+    );
+
+    // Renderer should return a component, not undefined
+    expect(renderResult).toBeDefined();
+  });
+
+  it("renderer returns undefined for incomplete payload", async () => {
+    // Test that renderer properly rejects invalid payloads
+    const mockTheme = {
+      fg: (_color: string, text: string) => text,
+    };
+
+    // Payload missing required fields
+    const incompletePayload = {
+      customType: "minion-complete",
+      content: "test",
+      display: true,
+      details: {
+        // Missing id and name
+        task: "test task",
+        exitCode: 0,
+        duration: 1000,
+      },
+    };
+
+    const renderResult = minionCompleteRenderer(
+      incompletePayload as any,
+      { expanded: false },
+      mockTheme as any,
+    );
+
+    expect(renderResult).toBeUndefined();
   });
 });

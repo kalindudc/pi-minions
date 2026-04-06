@@ -332,9 +332,13 @@ export async function runMinionSession(
 
     usage.turns = turnCount;
 
-    // Update final output from session if not captured
-    if (!finalOutput && session) {
-      finalOutput = extractLastAssistantText(session.state.messages);
+    // Always extract just the last assistant message to avoid full conversation history
+    let lastAssistantText = "";
+    if (session) {
+      lastAssistantText = extractLastAssistantText(session.state.messages);
+      if (lastAssistantText) {
+        finalOutput = lastAssistantText;
+      }
     }
 
     transcript.write(
@@ -347,11 +351,14 @@ export async function runMinionSession(
       name,
       exitCode: result.exitCode,
       turns: turnCount,
+      finalOutputLength: finalOutput?.length,
+      lastAssistantLength: lastAssistantText?.length,
     });
 
+    // Use the extracted last assistant message, not result.output which may contain full history
     return {
       exitCode: result.exitCode,
-      finalOutput: result.output || finalOutput,
+      finalOutput: finalOutput || result.output || "",
       usage,
       error: result.exitCode !== 0 ? result.output || "Unknown error" : undefined,
     };

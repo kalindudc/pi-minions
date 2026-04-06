@@ -18,11 +18,11 @@
 - [x] add `task style` command with Biome linter/formatter (enforces clean codebase with zero warnings)
 - [x] delegation reminder is very in consistent and there is no feedback when it is received
 - [x] add `/minions version` command to quickly see the running extension version
+- [x] bug: do not send a user message for background minion result, the LLM thinks it is from the user and evaluates as a user message which can lead to confusion
 - [ ] minion recursion with depth limits (agent frontmatter config)
 - [ ] minion chaining (output of one feeds into another)
 - [ ] bug: when the parent uses the halt tool, the aborted minion still sends back a user message, this is wasteful
 - [ ] bring background minions to foreground with queue
-- [ ] bug: do not send a user message for background minion result, the LLM thinks it is from the user and evaluates as a user message which can lead to confusion
 - [ ] fix critical unbounded Map growth: add TTL/capacity limit to ResultQueue results at src/queue.ts:10
 
 ### observability
