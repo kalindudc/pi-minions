@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-04-07
+
+- feat: Add proxy ExtensionUIContext that forwards interactive UI calls (confirm, select, input, editor) from minion sessions to parent through EventBus, with FIFO queue serialization for concurrent requests and configurable interaction timeout to prevent TUI dialog freezing
+
 ## [0.13.0] - 2026-04-07
 
 - feat: inherit authenticated extension tools in minion sessions
