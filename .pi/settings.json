@@ -5,7 +5,7 @@
       "extensions": []
     },
     {
-      "source": "npm:pi-minions@latest",
+      "source": "npm:pi-minions",
       "extensions": []
     }
   ],
