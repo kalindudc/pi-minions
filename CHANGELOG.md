@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-04-09
+
+- feat: add foreground attach for background minions
+- chore: increase default tool call threshold to 32 tool calls for the delegation reminder
+
 ## [0.14.0] - 2026-04-07
 
 - feat: Add proxy ExtensionUIContext that forwards interactive UI calls (confirm, select, input, editor) from minion sessions to parent through EventBus, with FIFO queue serialization for concurrent requests and configurable interaction timeout to prevent TUI dialog freezing

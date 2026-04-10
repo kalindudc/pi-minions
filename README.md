@@ -1,6 +1,6 @@
 # [oo] pi-minions
 
-[![version 0.14.0](https://img.shields.io/badge/version-0.14.0-blue)](CHANGELOG.md)
+[![version 0.15.0](https://img.shields.io/badge/version-0.15.0-blue)](CHANGELOG.md)
 [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE.md)
 [![pi extension](https://img.shields.io/badge/pi-extension-purple)](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
 
