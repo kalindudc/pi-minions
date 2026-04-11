@@ -455,7 +455,7 @@ async function executeSpawn(
           if (activity.type === "start") {
             const desc = formatToolCall(activity.toolName, activity.args ?? {});
             m.activity = `→ ${desc}`;
-            tree.updateActivity(m.id, `→ ${desc}`);
+            tree.logActivity(m.id, `→ ${desc}`);
             emitUpdate();
           }
         },
@@ -475,7 +475,7 @@ async function executeSpawn(
           emitUpdate();
         },
         onTurnEnd: (turnCount) => {
-          tree.updateActivity(m.id, `turn ${turnCount}`);
+          tree.logActivity(m.id, `turn ${turnCount}`);
         },
         onUsageUpdate: (usage) => {
           tree.updateUsage(m.id, usage);
@@ -1082,7 +1082,7 @@ export function spawnBg(
       interactionTimeout: piConfig.interaction.timeout * 1000,
       onToolActivity: (activity) => {
         if (activity.type === "start") {
-          tree.updateActivity(id, `→ ${formatToolCall(activity.toolName, activity.args ?? {})}`);
+          tree.logActivity(id, `→ ${formatToolCall(activity.toolName, activity.args ?? {})}`);
         }
       },
       onToolOutput: (toolName, delta) => {
@@ -1094,7 +1094,7 @@ export function spawnBg(
         tree.updateActivity(id, preview);
       },
       onTurnEnd: (turnCount) => {
-        tree.updateActivity(id, `turn ${turnCount}`);
+        tree.logActivity(id, `turn ${turnCount}`);
       },
       onUsageUpdate: (usage) => {
         tree.updateUsage(id, usage);

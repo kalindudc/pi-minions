@@ -113,20 +113,23 @@ class MinionObservabilityWidget {
     // Subscribe to tree changes to get activity updates
     this.unsubscribeTree = this.tree.onChange(() => {
       const node = this.tree.get(this.minionId);
-      logger.debug("observability", "tree-change", {
-        minionId: this.minionId,
-        hasNode: !!node,
-        lastActivity: node?.lastActivity,
-      });
-      if (node?.lastActivity) {
-        this.addMessage(node.lastActivity);
+      if (!node) return;
+      const history = node.activityHistory || [];
+      if (history.length > this.messages.length) {
+        for (let i = this.messages.length; i < history.length; i++)
+          this.messages.push({ text: history[i] ?? "" });
+        this.trimMessages();
+        this.triggerUpdate();
+        return;
       }
+      if (node.lastActivity) this.addMessage(node.lastActivity);
     });
 
-    // Load history from transcript first
-    const history = getMinionHistory(this.minionId);
-    for (const activity of history) {
-      this.messages.push({ text: activity });
+    // Preload persistent activity history
+    const historyNode = this.tree.get(this.minionId);
+    if (historyNode?.activityHistory) {
+      for (const activity of historyNode.activityHistory) this.messages.push({ text: activity });
+      this.trimMessages();
     }
 
     // Then load current activity if available
@@ -172,6 +175,12 @@ class MinionObservabilityWidget {
       messageCount: this.messages.length,
     });
     this.onUpdate();
+  }
+
+  private trimMessages(): void {
+    while (this.messages.length > this.maxVisibleMessages) {
+      this.messages.shift();
+    }
   }
 
   private addMessage(text: string): void {

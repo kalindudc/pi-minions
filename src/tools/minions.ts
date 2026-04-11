@@ -145,7 +145,7 @@ export function buildShowMinionText(
   target: string,
 ): string | null {
   const node = tree.resolve(target);
-  const result = queue.get(target);
+  const result = node ? queue.get(node.id) : queue.get(target);
 
   if (!node && !result) {
     return null;
@@ -174,7 +174,7 @@ export function buildShowMinionText(
     if (node.error) lines.push(`  Error: ${node.error}`);
 
     // Include recent activity history
-    const history = getMinionHistory(node.id);
+    const history = node.activityHistory ?? getMinionHistory(node.id);
     if (history.length > 0) {
       lines.push(`  Recent activity:`);
       for (const msg of history) {

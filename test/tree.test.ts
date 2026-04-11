@@ -187,9 +187,45 @@ describe("updateActivity", () => {
     expect(tree.get("a")?.lastActivity).toBe("→ $ ls -la");
   });
 
+  it("does not append to activityHistory", () => {
+    const tree = new AgentTree();
+    tree.add("a", "kevin", "do stuff");
+    tree.updateActivity("a", "→ $ ls -la");
+    expect(tree.get("a")?.activityHistory).toBeUndefined();
+  });
+
   it("is no-op for unknown id", () => {
     const tree = new AgentTree();
     expect(() => tree.updateActivity("nope", "test")).not.toThrow();
+  });
+});
+
+describe("logActivity", () => {
+  it("appends to activityHistory and notifies listeners", () => {
+    tree.add("a", "kevin", "do stuff");
+    const listener = vi.fn();
+    tree.onChange(listener);
+    tree.logActivity("a", "→ $ ls -la");
+    expect(tree.get("a")?.activityHistory).toEqual(["→ $ ls -la"]);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("is no-op for unknown id", () => {
+    const listener = vi.fn();
+    tree.onChange(listener);
+    tree.logActivity("nope", "test");
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe("setActivityHistory", () => {
+  it("restores history and notifies listeners", () => {
+    tree.add("a", "kevin", "do stuff");
+    const listener = vi.fn();
+    tree.onChange(listener);
+    tree.setActivityHistory("a", ["turn 1", "→ $ read file"]);
+    expect(tree.get("a")?.activityHistory).toEqual(["turn 1", "→ $ read file"]);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 

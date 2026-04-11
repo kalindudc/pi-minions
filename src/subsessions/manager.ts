@@ -9,6 +9,7 @@ import {
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 import { logger } from "../logger.js";
+import { formatToolCall } from "../render.js";
 import type { EventBus } from "./event-bus.js";
 import { MINION_COMPLETE_CHANNEL, MINION_PROGRESS_CHANNEL } from "./event-bus.js";
 import { createMinionUIContext } from "./interaction.js";
@@ -486,6 +487,29 @@ export class SubsessionManager {
 
       this.metadataCache.set(id, metadata);
     }
+  }
+
+  parseSessionHistory(id: string): string[] {
+    const path = this.getSessionPath(id);
+    if (!path) return [];
+    const history: string[] = [];
+    let turnCount = 0;
+    try {
+      for (const raw of readFileSync(path, "utf-8").split("\n")) {
+        if (!raw.trim()) continue;
+        const event = JSON.parse(raw) as Record<string, unknown>;
+        if (event.type === "tool_execution_start") {
+          const args = (event.args ?? {}) as Record<string, unknown>;
+          history.push(`→ ${formatToolCall(String(event.toolName), args)}`);
+        } else if (event.type === "turn_end") {
+          turnCount++;
+          history.push(`turn ${turnCount}`);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return history;
   }
 
   private listSessionFiles(dir: string): string[] {

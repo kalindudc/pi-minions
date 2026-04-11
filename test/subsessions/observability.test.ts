@@ -295,6 +295,59 @@ describe("showMinionObservability", () => {
   });
 });
 
+describe("activity history preloading", () => {
+  let tree: AgentTree;
+  let eventBus: EventBus;
+  let ctx: ExtensionContext;
+  let inputHandler: ((data: string) => { consume: boolean }) | null = null;
+
+  beforeEach(() => {
+    tree = new AgentTree();
+    eventBus = new EventBus();
+    ctx = createMockContext("/tmp");
+    inputHandler = null;
+
+    vi.mocked(ctx.ui.onTerminalInput).mockImplementation((handler) => {
+      inputHandler = handler as (data: string) => { consume: boolean };
+      return () => {
+        inputHandler = null;
+      };
+    });
+  });
+
+  it("renders lines from activityHistory on widget open", async () => {
+    tree.add("minion-123", "kevin", "test task");
+    tree.setActivityHistory("minion-123", ["turn 1", "→ $ ls"]);
+
+    showMinionObservability(ctx, tree, eventBus, "minion-123");
+
+    const renderCall = vi.mocked(ctx.ui.setWidget).mock.calls[0];
+    const renderFn = renderCall?.[1] as Function | undefined;
+    expect(renderFn).toBeDefined();
+
+    const mockTUI = { requestRender: vi.fn() };
+    const mockTheme = createMockTheme();
+    const textComponent = renderFn?.(mockTUI, mockTheme);
+    expect(textComponent).toBeDefined();
+
+    inputHandler?.("q");
+  });
+
+  it("syncs new history entries on tree change", async () => {
+    tree.add("minion-123", "kevin", "test task");
+    tree.setActivityHistory("minion-123", ["turn 1"]);
+
+    showMinionObservability(ctx, tree, eventBus, "minion-123");
+
+    vi.mocked(ctx.ui.setWidget).mockClear();
+    tree.logActivity("minion-123", "→ $ read file");
+
+    expect(ctx.ui.setWidget).toHaveBeenCalled();
+
+    inputHandler?.("q");
+  });
+});
+
 describe("hideObservability", () => {
   it("removes the observability widget", () => {
     const ctx = createMockContext("/tmp");

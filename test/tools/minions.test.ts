@@ -156,6 +156,32 @@ describe("showMinion", () => {
     expect(text).toContain("found 3 TODOs");
   });
 
+  it("shows queue output when resolving by name", async () => {
+    const tree = new AgentTree();
+    const queue = new ResultQueue();
+    tree.add("abc123", "kevin", "analyze code");
+    tree.updateStatus("abc123", "completed", 0);
+
+    queue.add({
+      id: "abc123",
+      name: "kevin",
+      task: "analyze code",
+      output: "found 3 TODOs",
+      usage: emptyUsage(),
+      status: "pending",
+      completedAt: Date.now(),
+      duration: 5000,
+      exitCode: 0,
+    });
+
+    const execute = showMinion(tree, queue);
+    const result = await execute("tc-1", { target: "kevin" }, undefined, undefined, createCtx());
+    const text = (result.content[0] as any).text;
+
+    expect(text).toContain("completed");
+    expect(text).toContain("found 3 TODOs");
+  });
+
   it("resolves by name via tree.resolve", async () => {
     const tree = new AgentTree();
     const queue = new ResultQueue();
@@ -239,6 +265,19 @@ describe("buildShowMinionText", () => {
     expect(text).toBeNull();
   });
 
+  it("shows activityHistory when present", () => {
+    const tree = new AgentTree();
+    const queue = new ResultQueue();
+
+    tree.add("a", "kevin", "analyze code");
+    tree.setActivityHistory("a", ["turn 1", "→ $ grep -r TODO"]);
+
+    const text = buildShowMinionText(tree, queue, "kevin");
+    expect(text).not.toBeNull();
+    expect(text).toContain("turn 1");
+    expect(text).toContain("→ $ grep -r TODO");
+  });
+
   it("returns string with name, status, and activity for known running minion", () => {
     const tree = new AgentTree();
     const queue = new ResultQueue();
@@ -251,6 +290,30 @@ describe("buildShowMinionText", () => {
     expect(text).toContain("kevin");
     expect(text).toContain("running");
     expect(text).toContain("→ $ grep -r TODO");
+  });
+
+  it("finds completed minion and queue output when called by name", () => {
+    const tree = new AgentTree();
+    const queue = new ResultQueue();
+
+    tree.add("abc123", "kevin", "analyze code");
+    tree.updateStatus("abc123", "completed", 0);
+    queue.add({
+      id: "abc123",
+      name: "kevin",
+      task: "analyze code",
+      output: "found 3 TODOs",
+      usage: emptyUsage(),
+      status: "pending",
+      completedAt: Date.now(),
+      duration: 5000,
+      exitCode: 0,
+    });
+
+    const text = buildShowMinionText(tree, queue, "kevin");
+    expect(text).not.toBeNull();
+    expect(text).toContain("completed");
+    expect(text).toContain("found 3 TODOs");
   });
 
   it("resolves target by ID", () => {

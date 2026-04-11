@@ -665,6 +665,42 @@ describe("SubsessionManager", () => {
     });
   });
 
+  describe("session history parsing", () => {
+    it("reconstructs activity from jsonl file", () => {
+      const minionsDir = getMinionsDir(tempDir);
+      mkdirSync(minionsDir, { recursive: true });
+
+      const sessionFile = join(minionsDir, "2026-04-02T22-46-54-session.jsonl");
+      const lines = [
+        '{"type":"session"}',
+        '{"type":"tool_execution_start","toolName":"bash","args":{"command":"ls"}}',
+        '{"type":"turn_end"}',
+        '{"type":"tool_execution_start","toolName":"read","args":{"path":"src/index.ts"}}',
+        '{"type":"turn_end"}',
+      ];
+      writeFileSync(sessionFile, lines.join("\n"));
+
+      const metadata: MinionSessionMetadata = {
+        sessionId: "history-minion",
+        parentSession: join(tempDir, "parent.jsonl"),
+        spawnedBy: "test",
+        name: "test-minion",
+        task: "test task",
+        createdAt: Date.now(),
+        status: "running",
+      };
+      writeFileSync(`${sessionFile}.minion-meta.json`, JSON.stringify(metadata));
+
+      const history = manager.parseSessionHistory("history-minion");
+      expect(history).toEqual(["→ $ ls", "turn 1", "→ read src/index.ts", "turn 2"]);
+    });
+
+    it("returns empty array for unknown session", () => {
+      const history = manager.parseSessionHistory("non-existent");
+      expect(history).toEqual([]);
+    });
+  });
+
   describe("async tool synchronization", () => {
     it("proceeds immediately when all expected parent tools are already present", async () => {
       const getAllToolsMock = vi.fn().mockReturnValue([

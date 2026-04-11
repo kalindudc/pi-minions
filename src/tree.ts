@@ -127,6 +127,24 @@ export class AgentTree {
     }
   }
 
+  logActivity(id: string, activity: string): void {
+    const node = this.nodes.get(id);
+    if (node) {
+      node.lastActivity = activity;
+      if (!node.activityHistory) node.activityHistory = [];
+      node.activityHistory.push(activity);
+      this.notify();
+    }
+  }
+
+  setActivityHistory(id: string, history: string[]): void {
+    const node = this.nodes.get(id);
+    if (node) {
+      node.activityHistory = [...history];
+      this.notify();
+    }
+  }
+
   /** Mark a node as detached (moved to background) */
   markDetached(id: string): void {
     const node = this.nodes.get(id);

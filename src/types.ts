@@ -61,6 +61,8 @@ export interface AgentNode {
   error?: string;
   /** Live activity line, e.g. "→ $ grep -r TODO src/" */
   lastActivity?: string;
+  /** Persistent activity history for observability widget */
+  activityHistory?: string[];
   /** True if moved to background (detached from foreground) */
   detached?: boolean;
   /** True if brought back to foreground (converted from bg to true fg) */

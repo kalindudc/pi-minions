@@ -161,7 +161,7 @@ export async function runMinionSession(
 
               // Update AgentTree for UI
               if (activity.type === "start") {
-                tree?.updateActivity(id, `→ ${activity.toolName}`);
+                tree?.logActivity(id, `→ ${activity.toolName}`);
               }
 
               opts.onToolActivity?.(activity);
@@ -192,7 +192,7 @@ export async function runMinionSession(
               transcript.write(`\n--- turn ${count} ---`);
 
               // Update AgentTree
-              tree?.updateActivity(id, `turn ${count}`);
+              tree?.logActivity(id, `turn ${count}`);
 
               // Step limit enforcement
               if (config.steps !== undefined && count >= config.steps && !stepLimitReached) {

@@ -51,7 +51,7 @@ export default function (pi: ExtensionAPI): void {
   logger.debug("extension", "loaded", { logFile: LOG_FILE });
 
   // Core state
-  const tree = new AgentTree();
+  let tree = new AgentTree();
   const queue = new ResultQueue();
   // SubsessionManager is initialized in session_start event
   let subsessionManager: SubsessionManager | undefined;
@@ -165,7 +165,7 @@ export default function (pi: ExtensionAPI): void {
     label: "Show Minion",
     description: "Show detailed status, activity, and output of a minion by ID or name.",
     parameters: ShowMinionParams,
-    execute: showMinion(tree, queue),
+    execute: (...args) => showMinion(tree, queue)(...args),
   });
 
   // Register custom message renderers
@@ -209,7 +209,6 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  tree.onChange(() => statusTracker?.refresh());
   pi.on("tool_execution_end", (event) => {
     logger.debug("status", "tool_execution_end", { tool: event.toolName });
     statusTracker?.refresh();
@@ -281,6 +280,20 @@ export default function (pi: ExtensionAPI): void {
     // Create subsession manager for file-based minion sessions (always use file-based)
     const parentSessionPath = ctx.sessionManager?.getSessionFile() ?? getTempSessionPath(ctx.cwd);
     subsessionManager = new SubsessionManager(ctx.cwd, parentSessionPath, eventBus);
+
+    tree = new AgentTree();
+
+    for (const metadata of subsessionManager.list()) {
+      if (metadata.parentSession === parentSessionPath) {
+        tree.add(metadata.sessionId, metadata.name, metadata.task, undefined, metadata.agent);
+        const history = subsessionManager.parseSessionHistory(metadata.sessionId);
+        if (history.length > 0) tree.setActivityHistory(metadata.sessionId, history);
+        if (metadata.status !== "running") {
+          tree.updateStatus(metadata.sessionId, metadata.status, metadata.exitCode, metadata.error);
+        }
+      }
+    }
+
     logger.debug("session", "subsession-manager-created", {
       cwd: ctx.cwd,
       parentSession: parentSessionPath,
@@ -289,6 +302,7 @@ export default function (pi: ExtensionAPI): void {
 
     // Initialize status tracker now that we have subsessionManager
     statusTracker = createStatusTracker(tree, subsessionManager, ctx);
+    tree.onChange(() => statusTracker?.refresh());
     statusTracker.setUi(cachedUi);
 
     // Clean up legacy status keys from previous versions
