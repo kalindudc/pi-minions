@@ -1,6 +1,6 @@
 # Test: list-minions
 
-Verify that the `list_minions` tool shows running minions.
+Verify that the `list_minion_types` tool shows running minions.
 
 ## Setup
 
@@ -14,15 +14,15 @@ First, call the `spawn_bg` tool with:
 
 Extract the minion name from the spawn_bg response.
 
-Wait 2 seconds, then call the `list_minions` tool.
+Wait 2 seconds, then call the `list_minion_types` tool.
 
 After checking, call the `halt` tool with:
 - `id`: `all`
 
 ## Expected
 
-- The `list_minions` result contains the word "Running"
-- The `list_minions` result contains the minion name from the spawn_bg response
+- The `list_minion_types` result contains the word "Running"
+- The `list_minion_types` result contains the minion name from the spawn_bg response
 
 ## Cleanup
 

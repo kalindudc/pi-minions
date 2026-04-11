@@ -1,7 +1,6 @@
 import type { AgentToolResult, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import { discoverAgents } from "../agents.js";
 import type { ResultQueue } from "../queue.js";
 import { formatDuration, formatUsage } from "../render.js";
 import type { SubsessionManager } from "../subsessions/manager.js";
@@ -75,35 +74,12 @@ export async function executeSteering(
   return `Steered ${node.name} (${node.id}): ${message}`;
 }
 
-// list_minions
+// list_minion_types
 
 export type ListMinionsParams = Static<typeof ListAgentsParams>;
 
 export function listMinions() {
-  return async function execute(
-    _toolCallId: string,
-    _params: ListMinionsParams,
-    _signal: AbortSignal | undefined,
-    _onUpdate: unknown,
-    ctx: ExtensionContext,
-  ): Promise<AgentToolResult<unknown>> {
-    const { agents } = discoverAgents(ctx.cwd, "both");
-
-    const lines: string[] = [];
-
-    // Built-in ephemeral minion (always available)
-    lines.push("  minion (built-in): General-purpose ephemeral minion with default capabilities");
-
-    for (const a of agents) {
-      const model = a.model ? ` [model: ${a.model}]` : "";
-      lines.push(`  ${a.name} (${a.source}): ${a.description}${model}`);
-    }
-
-    return {
-      content: [{ type: "text", text: `Available agents:\n${lines.join("\n")}` }],
-      details: undefined,
-    };
-  };
+  // TODO:
 }
 
 // steer_minion

@@ -10,7 +10,7 @@
 | [`spawn_bg`](#spawn--spawn_bg) | Tool | Background task delegation (returns immediately) |
 | [`halt`](#halt) | Tool | Abort running minion(s) |
 | [`list_agents`](#list_agents) | Tool | Discover available named agents |
-| [`list_minions`](#list_minions) | Tool | List running and pending minions |
+| [`list_minion_types`](#list_minion_types) | Tool | List running and pending minions |
 | [`show_minion`](#show_minion) | Tool | Detailed minion status |
 | [`steer_minion`](#steer_minion) | Tool | Inject message into running minion |
 | [`/spawn`](#spawn-1) | Command | Spawn minion (user-initiated) |
@@ -104,7 +104,7 @@ Discovers agents from global and project directories. See [Agents — Where to p
 
 ---
 
-### list_minions
+### list_minion_types
 
 List running and pending minions.
 

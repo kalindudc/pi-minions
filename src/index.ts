@@ -19,13 +19,7 @@ import { SubsessionManager } from "./subsessions/manager.js";
 import { getTempSessionPath } from "./subsessions/paths.js";
 import { HaltToolParams, halt } from "./tools/halt.js";
 import { ListAgentsParams, listAgents } from "./tools/list-agents.js";
-import {
-  listMinions,
-  ShowMinionParams,
-  SteerMinionParams,
-  showMinion,
-  steerMinion,
-} from "./tools/minions.js";
+import { ShowMinionParams, SteerMinionParams, showMinion, steerMinion } from "./tools/minions.js";
 import { SpawnBgToolParams, SpawnToolParams, spawn, spawnBg } from "./tools/spawn.js";
 import { AgentTree } from "./tree.js";
 
@@ -152,12 +146,12 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "list_minions",
+    name: "list_minion_types",
     label: "List Minions",
     description: "List available agent types that can be spawned as minions.",
     promptSnippet: "List available minion types",
     parameters: ListAgentsParams,
-    execute: listMinions(),
+    execute: listAgents(),
   });
 
   pi.registerTool({

@@ -15,7 +15,7 @@ pi-minions is a pi-coding-agent extension (`src/index.ts`) that adds recursive s
 | `src/render.ts` | TUI rendering for spawn calls |
 | `src/logger.ts` | Structured debug logging |
 | `src/types.ts` | Shared types (`AgentConfig`, `AgentNode`, `QueuedResult`, `SpawnResult`) |
-| `src/tools/*.ts` | Tool implementations (`spawn`, `spawn_bg`, `halt`, `list_agents`, `list_minions`, `show_minion`, `steer_minion`) |
+| `src/tools/*.ts` | Tool implementations (`spawn`, `spawn_bg`, `halt`, `list_agents`, `list_minion_types`, `show_minion`, `steer_minion`) |
 | `src/commands/*.ts` | Command handlers (`/spawn`, `/minions`, `/halt`) |
 
 ## Development

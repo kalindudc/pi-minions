@@ -4,7 +4,6 @@ import type { SubsessionManager } from "../../src/subsessions/manager.js";
 import {
   buildShowMinionText,
   executeSteering,
-  listMinions,
   showMinion,
   steerMinion,
   validateSteerTarget,
@@ -16,8 +15,6 @@ import { emptyUsage } from "../../src/types.js";
 vi.mock("../../src/agents.js", () => ({
   discoverAgents: vi.fn().mockReturnValue({ agents: [], projectAgentsDir: null }),
 }));
-
-import { discoverAgents } from "../../src/agents.js";
 
 function createMockSubsessionManager(sessions: Map<string, any> = new Map()) {
   return {
@@ -55,53 +52,6 @@ function createCtx() {
     ui: { setWorkingMessage: vi.fn() },
   } as any;
 }
-
-describe("listMinions", () => {
-  it("returns available agents message", async () => {
-    vi.mocked(discoverAgents).mockReturnValueOnce({ agents: [], projectAgentsDir: null });
-
-    const execute = listMinions();
-    const result = await execute("tc-1", {}, undefined, undefined, createCtx());
-    const text = (result.content[0] as any).text;
-
-    expect(discoverAgents).toHaveBeenCalledWith("/tmp", "both");
-    expect(text).toContain("Available agents:");
-    expect(text).toContain("minion (built-in)");
-  });
-
-  it("includes discovered agents in output", async () => {
-    vi.mocked(discoverAgents).mockReturnValueOnce({
-      agents: [
-        {
-          name: "test-agent",
-          description: "A test agent",
-          source: "project",
-          systemPrompt: "test",
-          filePath: "/test.md",
-        },
-        {
-          name: "another-agent",
-          description: "Another agent",
-          source: "user",
-          model: "gpt-4",
-          systemPrompt: "test2",
-          filePath: "/test2.md",
-        },
-      ],
-      projectAgentsDir: null,
-    });
-
-    const execute = listMinions();
-    const result = await execute("tc-1", {}, undefined, undefined, createCtx());
-    const text = (result.content[0] as any).text;
-
-    expect(text).toContain("Available agents:");
-    expect(text).toContain("minion (built-in)");
-    expect(text).toContain("test-agent");
-    expect(text).toContain("another-agent");
-    expect(text).toContain("[model: gpt-4]");
-  });
-});
 
 describe("showMinion", () => {
   it("throws for unknown minion", async () => {

@@ -32,7 +32,7 @@
 - [x] transcript logging per minion (tmp/logs/minions/)
 - [x] activity tracking with live progress updates
 - [x] detailed minion status (show_minion tool)
-- [x] list running and pending minions (list_minions tool)
+- [x] list running and pending minions (list_minion_types tool)
 - [x] standardize debug logging
 - [x] bug: when multiple parallel minions are working in the foreground and when one finishes before the other, it's completion status does not update until one of the other completes (rendering bug in TUI)
 - [x] minions spawned in a session should count towards the parent sessions token usage and cost to be visible on the footer widget

@@ -95,7 +95,7 @@ Convention: `.pi/agents/e2e-<purpose>.md`, minimal frontmatter, simple system pr
 | `transcripts` | `spawn` | Transcript file structure |
 | `spawn-bg` | `spawn_bg` | Background spawn, immediate return, async completion |
 | `halt-minion` | `spawn_bg`, `halt` | Abort running minion |
-| `list-minions` | `spawn_bg`, `list_minions`, `halt` | List running minions |
+| `list-minions` | `spawn_bg`, `list_minion_types`, `halt` | List running minions |
 | `show-minion` | `spawn_bg`, `show_minion`, `halt` | Detailed minion status |
 | `steer-minion` | `spawn_bg`, `steer_minion` | Inject message, minion completes |
 | `ephemeral-minion` | `spawn` | Spawn without agent, default config |
