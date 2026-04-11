@@ -20,10 +20,10 @@ export async function abortAgents(
 ): Promise<number> {
   let count = 0;
   for (const id of ids) {
-    const session = subsessionManager.getSession(id);
-    logger.debug("halt", "aborting", { id, hasSession: session !== undefined });
-    if (session) {
-      session.abort();
+    const hasHandle = subsessionManager.getSessionHandle(id) !== undefined;
+    logger.debug("halt", "aborting", { id, hasHandle });
+    if (hasHandle) {
+      subsessionManager.abortSession(id);
     }
     tree.updateStatus(id, "aborted");
     count++;

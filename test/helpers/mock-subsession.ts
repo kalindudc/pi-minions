@@ -46,6 +46,27 @@ export class MockSubsessionManager {
     return this.sessions.get(id);
   }
 
+  getSessionHandle(id: string): MinionSessionHandle | undefined {
+    const session = this.sessions.get(id);
+    if (!session) return undefined;
+    const meta = this.metadata.get(id);
+    return {
+      id,
+      path: meta ? `/mock/path/${meta.sessionId}.${meta.name}.jsonl` : `/mock/path/${id}.jsonl`,
+      steer: async (text: string) => session.steer(text),
+      abort: () => session.abort(),
+    };
+  }
+
+  abortSession(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.abort();
+      return true;
+    }
+    return false;
+  }
+
   updateStatus(
     id: string,
     status: MinionSessionMetadata["status"],

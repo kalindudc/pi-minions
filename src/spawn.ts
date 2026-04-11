@@ -225,10 +225,7 @@ export async function runMinionSession(
                   steps: config.steps,
                   turnCount: count,
                 });
-                const session = subsessionManager.getSession(id);
-                if (session) {
-                  session.abort();
-                }
+                subsessionManager.abortSession(id);
               }
 
               opts.onTurnEnd?.(count);

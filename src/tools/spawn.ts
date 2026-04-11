@@ -12,8 +12,8 @@ import { logger } from "../logger.js";
 import { defaultMinionTemplate, generateId, pickMinionName } from "../minions.js";
 import type { ResultQueue } from "../queue.js";
 import { formatToolCall } from "../render.js";
+import { BatchCoordinator, handleCompletion, runSingleMinion } from "../spawn/index.js";
 import { runMinionSession } from "../spawn.js";
-import { EventBus } from "../subsessions/event-bus.js";
 import type { SubsessionManager } from "../subsessions/manager.js";
 import type { AgentTree } from "../tree.js";
 import type { AgentConfig, AgentStatus, UsageStats } from "../types.js";
@@ -131,133 +131,7 @@ function resolveAgentConfig(agentName: string, cwd: string): AgentConfig {
   return found;
 }
 
-// Process minion completion - async function that handles the session promise
-async function processCompletion(
-  sessionPromise: Promise<import("../types.js").SpawnResult>,
-  id: string,
-  name: string,
-  task: string,
-  startTime: number,
-  tree: AgentTree,
-  queue: ResultQueue,
-  pi: ExtensionAPI,
-): Promise<void> {
-  let result: import("../types.js").SpawnResult;
-
-  try {
-    result = await sessionPromise;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error("spawn:completion", "sessionPromise-rejected", { id, name, error: msg });
-    tree.updateStatus(id, "failed", 1, msg);
-    logger.error("spawn:tool", "bg-failed", { id, name, error: msg });
-    return;
-  }
-
-  logger.debug("spawn:completion", "sessionPromise-resolved", {
-    id,
-    name,
-    exitCode: result.exitCode,
-    hasOutput: !!result.finalOutput,
-    outputLength: result.finalOutput?.length,
-    outputPreview: result.finalOutput?.slice(0, 200),
-    hasError: !!result.error,
-  });
-
-  const status = result.exitCode === 0 ? "completed" : "failed";
-  tree.updateStatus(id, status, result.exitCode, result.error);
-  tree.updateUsage(id, result.usage);
-  logger.debug("spawn:completion", "tree-updated", { id, status });
-
-  queue.add({
-    id,
-    name,
-    task,
-    output: result.finalOutput,
-    usage: result.usage,
-    status: "pending",
-    completedAt: Date.now(),
-    duration: Date.now() - startTime,
-    exitCode: result.exitCode,
-    error: result.error,
-  });
-  logger.debug("spawn:completion", "queue-add-called", { id });
-
-  // Content visible to LLM - brief system indicator that parent should react
-  const content = `[Background minion "${name}" completed - exit code: ${result.exitCode}]`;
-
-  try {
-    const messagePayload = {
-      customType: "minion-complete" as const,
-      content,
-      display: true,
-      details: {
-        id,
-        name,
-        task,
-        exitCode: result.exitCode,
-        error: result.error,
-        duration: Date.now() - startTime,
-        output: result.finalOutput, // Full output for renderer
-      },
-    };
-
-    if (tree.isForegrounded(id)) {
-      logger.debug("spawn:completion", "minion-was-foregrounded, skipping-sendMessage", { id });
-    } else {
-      pi.sendMessage(messagePayload, { triggerTurn: true });
-      logger.debug("spawn:completion", "sendMessage-called", { id, name, triggerTurn: true });
-    }
-  } catch (sendErr) {
-    const sendMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
-    logger.error("spawn:completion", "sendMessage-failed", { id, error: sendMsg });
-  }
-
-  queue.accept(id);
-  logger.info("spawn:tool", "completed", {
-    id,
-    name,
-    exitCode: result.exitCode,
-  });
-}
-
-// Handle completion - fire-and-forget wrapper
-function handleCompletion(
-  sessionPromise: Promise<import("../types.js").SpawnResult>,
-  id: string,
-  name: string,
-  task: string,
-  startTime: number,
-  tree: AgentTree,
-  queue: ResultQueue,
-  pi: ExtensionAPI,
-): void {
-  logger.debug("spawn:completion", "handleCompletion-called", { id, name, task });
-  // Fire-and-forget: don't await the promise, errors are handled internally
-  processCompletion(sessionPromise, id, name, task, startTime, tree, queue, pi);
-}
-
-// Create shared event bus for detach signals
-function createDetachBus() {
-  const bus = new EventBus();
-  return {
-    emit: (id: string) => bus.emit("detach", id),
-    on: (id: string, handler: () => void) => {
-      const unsubscribe = bus.on<string>("detach", (detachedId) => {
-        if (detachedId === id) handler();
-      });
-      return unsubscribe;
-    },
-  };
-}
-
-// Shared detach bus across all spawn calls
-const detachBus = createDetachBus();
-
-/** Detach a foreground minion */
-export function detachMinion(id: string): void {
-  detachBus.emit(id);
-}
+export { detachMinion } from "../spawn/index.js";
 
 // Unified spawn execution - treats everything as a batch internally
 // The renderer handles the difference between 1 vs many minions
@@ -337,305 +211,64 @@ async function executeSpawn(
     }
   }
 
-  // Spinner animation - runs independently every 100ms regardless of minion activity
-  let completed = false;
-  const spinnerInterval = setInterval(() => {
-    if (completed) return;
-
-    let frameUpdated = false;
-    for (const m of minions) {
-      if (m.status === "running") {
-        m.spinnerFrame = (m.spinnerFrame ?? 0) + 1;
-        frameUpdated = true;
-      }
-    }
-
-    // Only emit update if at least one minion is still running
-    // This prevents unnecessary updates after all minions complete
-    if (frameUpdated) {
-      emitUpdate();
-    }
-  }, 100);
-
-  // Create batch tracking ID
   const batchId = generateId();
   const batchName = isSingleMinion ? minions[0].name : `batch-${batchId.slice(0, 8)}`;
-
-  // Emit update function
-  const emitUpdate = () => {
-    if (completed) return;
-
-    const firstMinion = minions[0];
-    const allCompleted = minions.every((m) => m.status === "completed");
-    const anyFailed = minions.some((m) => m.status === "failed");
-    const anyAborted = minions.some((m) => m.status === "aborted");
-    const status = anyAborted
-      ? "aborted"
-      : anyFailed
-        ? "failed"
-        : allCompleted
-          ? "completed"
-          : "running";
-
-    const totalUsage = minions.reduce(
-      (acc, m) => ({
-        input: acc.input + m.usage.input,
-        output: acc.output + m.usage.output,
-        cacheRead: acc.cacheRead + m.usage.cacheRead,
-        cacheWrite: acc.cacheWrite + m.usage.cacheWrite,
-        cost: acc.cost + m.usage.cost,
-        contextTokens: acc.contextTokens + m.usage.contextTokens,
-        turns: acc.turns + m.usage.turns,
-      }),
-      emptyUsage(),
-    );
-
-    // For single minion with simple output, don't wrap with name
-    const finalOutput =
-      isSingleMinion && minions.length === 1
-        ? firstMinion.finalOutput
-        : minions.map((m) => `=== ${m.name} ===\n${m.finalOutput}`).join("\n\n");
-
-    onUpdate?.({
-      content: [{ type: "text", text: "" }],
-      details: {
-        id: isSingleMinion ? firstMinion.id : batchId,
-        name: isSingleMinion ? firstMinion.name : batchName,
-        agentName: isSingleMinion ? firstMinion.agentName : "batch",
-        task: isSingleMinion ? firstMinion.task : `batch of ${specs.length} minions`,
-        isBatch: true,
-        minions: [...minions],
-        status,
-        usage: totalUsage,
-        model: firstMinion.model,
-        finalOutput,
-        outputPreviewLines,
-        spinnerFrames,
-      },
-    });
-  };
+  const coordinator = new BatchCoordinator({
+    minions,
+    isSingleMinion,
+    batchId,
+    batchName,
+    batchTask: isSingleMinion ? minions[0].task : `batch of ${specs.length} minions`,
+    outputPreviewLines,
+    spinnerFrames,
+    onUpdate,
+  });
+  coordinator.start();
 
   // Track detached minions
   const detachedMinions = new Set<string>();
   const detachResolvers = new Map<string, () => void>();
 
-  // Run all minions in parallel
-  const sessionPromises = minions.map(async (m, index) => {
+  const sessionPromises = minions.map((m, index) => {
     const spec = specs[index];
     if (!spec) {
       throw new Error(`No spec found for minion at index ${index}`);
     }
-
-    const config = spec.agent
-      ? resolveAgentConfig(spec.agent, ctx.cwd)
-      : defaultMinionTemplate(m.name, { model: spec.model });
-
-    // Emit initial update for this minion
-    emitUpdate();
-
-    try {
-      const sessionPromise = runMinionSession(config, spec.task, {
-        id: m.id,
-        name: m.name,
-        signal: controller.signal,
-        modelRegistry: ctx.modelRegistry,
-        parentModel: ctx.model,
-        cwd: ctx.cwd,
-        subsessionManager,
-        spawnedBy: toolCallId,
-        parentSessionPath: ctx.sessionManager?.getSessionFile() ?? undefined,
-        parentToolNames,
-        toolSyncEnabled: piConfig.toolSync.enabled,
-        toolSyncMaxWait: piConfig.toolSync.maxWait * 1000,
-        interactionTimeout: piConfig.interaction.timeout * 1000,
-        onToolActivity: (activity) => {
-          if (activity.type === "start") {
-            const desc = formatToolCall(activity.toolName, activity.args ?? {});
-            m.activity = `→ ${desc}`;
-            tree.logActivity(m.id, `→ ${desc}`);
-            emitUpdate();
-          }
-        },
-        onToolOutput: (toolName, delta) => {
-          const line = delta.trimEnd().split("\n").filter(Boolean).at(-1) ?? "";
-          if (line) {
-            m.activity = `${toolName}: ${line}`;
-            tree.updateActivity(m.id, `${toolName}: ${line}`);
-            emitUpdate();
-          }
-        },
-        onTextDelta: (_delta, fullText) => {
-          const preview = fullText.split("\n").filter(Boolean).at(-1) ?? "";
-          m.activity = preview;
-          m.finalOutput = preview;
-          tree.updateActivity(m.id, preview);
-          emitUpdate();
-        },
-        onTurnEnd: (turnCount) => {
-          tree.logActivity(m.id, `turn ${turnCount}`);
-        },
-        onUsageUpdate: (usage) => {
-          tree.updateUsage(m.id, usage);
-          m.usage = {
-            input: usage.input,
-            output: usage.output,
-            cacheRead: usage.cacheRead,
-            cacheWrite: usage.cacheWrite,
-            cost: usage.cost,
-            contextTokens: 0,
-            turns: 0,
-          };
-          emitUpdate();
-        },
-      });
-
-      // Support detach for this minion
-      let detachResolve: (() => void) | undefined;
-
-      const detachPromise = new Promise<{
-        exitCode: number;
-        finalOutput: string;
-        usage: UsageStats;
-        detached: boolean;
-      }>((resolve) => {
-        detachResolve = () => {
-          detachedMinions.add(m.id);
-          resolve({
-            exitCode: 0,
-            finalOutput: "detached",
-            usage: { ...emptyUsage() },
-            detached: true,
-          });
-        };
-        detachResolvers.set(m.id, detachResolve);
-      });
-
-      // Set up listener to trigger detach
-      const unsubscribeThisDetach = detachBus.on(m.id, () => {
-        logger.debug("spawn:tool", "minion-detached", {
-          id: m.id,
-          name: m.name,
-          batch: !isSingleMinion,
-        });
-        detachResolve?.();
-      });
-
-      const result = await Promise.race([sessionPromise, detachPromise]);
-
-      unsubscribeThisDetach();
-
-      // Handle detach - check using the detachedMinions set since result might be either type
-      if ("detached" in result || detachedMinions.has(m.id)) {
-        logger.debug("spawn:tool", "detached", { id: m.id, name: m.name, batch: !isSingleMinion });
-        tree.markDetached(m.id);
-        m.detached = true; // Mark as detached so it's filtered from foreground display
-        const startTime = tree.get(m.id)?.startTime ?? Date.now();
-        handleCompletion(sessionPromise, m.id, m.name, spec.task, startTime, tree, _queue, pi);
-        // Keep status as running since it's now in background
-        m.status = "running";
-        m.finalOutput = "Moved to background by user";
-        emitUpdate(); // Emit update so UI shows detached status
-        return {
-          success: true,
-          result: {
-            exitCode: 0,
-            finalOutput: `Moved to background by user`,
-            usage: tree.get(m.id)?.usage ?? emptyUsage(),
-          },
-          detached: true,
-        };
-      }
-
-      // Normal completion - but don't overwrite "aborted" status
-      const currentStatus = tree.get(m.id)?.status;
-      if (currentStatus !== "aborted") {
-        m.status = result.exitCode === 0 ? "completed" : "failed";
-        m.finalOutput = result.finalOutput;
-        m.usage = result.usage;
-        const errorMsg =
-          typeof result === "object" && result && "error" in result
-            ? String(result.error)
-            : undefined;
-        tree.updateStatus(m.id, m.status, result.exitCode, errorMsg);
-        tree.updateUsage(m.id, result.usage);
-        emitUpdate(); // Emit update so UI shows final status
-      } else {
-        // Minion was aborted - keep the aborted status
-        m.status = "aborted";
-        m.finalOutput = result.finalOutput;
-        emitUpdate(); // Emit update so UI shows aborted status
-      }
-
-      if (!isSingleMinion) {
-        logger.debug("spawn:tool", "batch-minion-complete", {
-          id: m.id,
-          name: m.name,
-          status: m.status,
-          exitCode: result.exitCode,
-        });
-      }
-
-      return { success: result.exitCode === 0, result };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      m.status = "failed";
-      m.finalOutput = msg;
-      tree.updateStatus(m.id, "failed", 1, msg);
-      logger.error("spawn:tool", isSingleMinion ? "failed" : "batch-minion-failed", {
-        id: m.id,
-        name: m.name,
-        error: msg,
-      });
-      return { success: false, error: msg };
-    }
+    return runSingleMinion({
+      spec,
+      m,
+      isSingleMinion,
+      toolCallId,
+      controller,
+      detachedMinions,
+      detachResolvers,
+      tree,
+      queue: _queue,
+      pi,
+      ctx,
+      piConfig,
+      parentToolNames,
+      subsessionManager,
+      coordinator,
+    });
   });
 
-  // Wait for all to complete (or be detached)
   const results = await Promise.allSettled(sessionPromises);
-  completed = true;
-  clearInterval(spinnerInterval);
+  coordinator.stop();
 
-  // Aggregate results
   const anyFailed = results.some((r, idx) => {
     const m = minions[idx];
-    // Detached minions are not considered failures
     if (m && detachedMinions.has(m.id)) return false;
     return r.status === "rejected" || !(r.value as { success: boolean }).success;
   });
-
-  // Count completed (non-detached) minions
   const completedCount = minions.filter((m) => m.status === "completed").length;
   const detachedCount = detachedMinions.size;
   const failedCount = minions.filter((m) => m.status === "failed").length;
-  const abortedCount = minions.filter((m) => m.status === "aborted").length;
-
-  // Determine final status
-  // Priority: aborted > failed > completed > running
-  const hasDetached = detachedCount > 0;
-  const hasCompletedNonDetached = minions.some(
-    (m) => !detachedMinions.has(m.id) && m.status === "completed",
-  );
-
-  let finalStatus: AgentStatus;
-  if (abortedCount > 0) {
-    finalStatus = "aborted";
-  } else if (anyFailed) {
-    finalStatus = "failed";
-  } else if (hasCompletedNonDetached || (!hasDetached && completedCount > 0)) {
-    // Completed if there are completed non-detached minions, or if no detachments and some completed
-    finalStatus = "completed";
-  } else if (hasDetached) {
-    // Running if any were detached (they continue in background)
-    finalStatus = "running";
-  } else {
-    finalStatus = "failed";
-  }
-
-  // Emit final update
-  emitUpdate();
+  const finalStatus = coordinator.getStatus(detachedMinions);
+  coordinator.emit(true);
 
   const firstMinion = minions[0];
-  const finalOutput = minions.map((m) => `=== ${m.name} ===\n${m.finalOutput}`).join("\n\n");
+  const finalOutput = coordinator.getOutput();
 
   if (isSingleMinion) {
     logger.info("spawn:tool", finalStatus === "completed" ? "completed" : "failed", {
@@ -789,61 +422,16 @@ async function executeAttach(
     logger.debug("spawn:tool", "attach-marked", { id: m.id, name: m.name });
   }
 
-  let completed = false;
-
-  // Emit update function
-  const emitUpdate = () => {
-    if (completed) return;
-
-    const firstMinion = minions[0];
-    const allCompleted = minions.every((m) => m.status === "completed");
-    const anyFailed = minions.some((m) => m.status === "failed");
-    const anyAborted = minions.some((m) => m.status === "aborted");
-    const status = anyAborted
-      ? "aborted"
-      : anyFailed
-        ? "failed"
-        : allCompleted
-          ? "completed"
-          : "running";
-
-    const totalUsage = minions.reduce(
-      (acc, m) => ({
-        input: acc.input + m.usage.input,
-        output: acc.output + m.usage.output,
-        cacheRead: acc.cacheRead + m.usage.cacheRead,
-        cacheWrite: acc.cacheWrite + m.usage.cacheWrite,
-        cost: acc.cost + m.usage.cost,
-        contextTokens: acc.contextTokens + m.usage.contextTokens,
-        turns: acc.turns + m.usage.turns,
-      }),
-      emptyUsage(),
-    );
-
-    const finalOutput = isSingleMinion
-      ? firstMinion.finalOutput
-      : minions.map((m) => `=== ${m.name} ===\n${m.finalOutput}`).join("\n\n");
-
-    onUpdate?.({
-      content: [{ type: "text", text: "" }],
-      details: {
-        id: isSingleMinion ? firstMinion.id : batchId,
-        name: isSingleMinion ? firstMinion.name : batchName,
-        agentName: isSingleMinion ? firstMinion.agentName : "batch",
-        task: isSingleMinion ? firstMinion.task : `attached batch of ${ids.length} minions`,
-        isBatch: true,
-        minions: [...minions],
-        status,
-        usage: totalUsage,
-        model: undefined,
-        finalOutput,
-        outputPreviewLines,
-        spinnerFrames,
-      },
-    });
-  };
-
-  // Subscribe to tree changes for activity/usage updates
+  const coordinator = new BatchCoordinator({
+    minions,
+    isSingleMinion,
+    batchId,
+    batchName: isSingleMinion ? minions[0].name : `batch-${batchId.slice(0, 8)}`,
+    batchTask: isSingleMinion ? minions[0].task : `attached batch of ${ids.length} minions`,
+    outputPreviewLines,
+    spinnerFrames,
+    onUpdate,
+  });
   const unsubscribeTree = tree.onChange(() => {
     for (const m of minions) {
       const node = tree.get(m.id);
@@ -854,22 +442,9 @@ async function executeAttach(
         m.activity = node.lastActivity ?? m.activity;
       }
     }
-    emitUpdate();
+    coordinator.emit(true);
   });
-
-  // Spinner animation
-  const spinnerInterval = setInterval(() => {
-    if (completed) return;
-    for (const m of minions) {
-      if (m.status === "running") {
-        m.spinnerFrame = (m.spinnerFrame ?? 0) + 1;
-      }
-    }
-    emitUpdate();
-  }, 100);
-
-  // Initial update
-  emitUpdate();
+  coordinator.start();
 
   // Wait for all minions to complete
   try {
@@ -900,12 +475,10 @@ async function executeAttach(
       }
     });
   } finally {
-    completed = true;
-    clearInterval(spinnerInterval);
+    coordinator.stop();
     unsubscribeTree();
   }
 
-  // Get final results
   const finalResults = minions.map((m) => {
     const node = tree.get(m.id);
     const result = queue.get(m.id);
@@ -917,33 +490,9 @@ async function executeAttach(
     };
   });
 
-  const allCompleted = finalResults.every((m) => m.status === "completed");
-  const anyFailed = finalResults.some((m) => m.status === "failed");
-  const anyAborted = finalResults.some((m) => m.status === "aborted");
-  const finalStatus = anyAborted
-    ? "aborted"
-    : anyFailed
-      ? "failed"
-      : allCompleted
-        ? "completed"
-        : "running";
-
-  const totalUsage = finalResults.reduce(
-    (acc, m) => ({
-      input: acc.input + m.usage.input,
-      output: acc.output + m.usage.output,
-      cacheRead: acc.cacheRead + m.usage.cacheRead,
-      cacheWrite: acc.cacheWrite + m.usage.cacheWrite,
-      cost: acc.cost + m.usage.cost,
-      contextTokens: acc.contextTokens + m.usage.contextTokens,
-      turns: acc.turns + m.usage.turns,
-    }),
-    emptyUsage(),
-  );
-
-  const finalOutput = isSingleMinion
-    ? finalResults[0].finalOutput
-    : finalResults.map((m) => `=== ${m.name} ===\n${m.finalOutput}`).join("\n\n");
+  const finalStatus = coordinator.getStatus();
+  const totalUsage = coordinator.getUsage();
+  const finalOutput = coordinator.getOutput();
 
   // Build result text
   const resultText = isSingleMinion

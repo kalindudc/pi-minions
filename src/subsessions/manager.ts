@@ -22,6 +22,7 @@ import type {
 
 export class SubsessionManager {
   private activeSessions = new Map<string, AgentSession>();
+  private activeHandles = new Map<string, MinionSessionHandle>();
   private metadataCache = new Map<string, MinionSessionMetadata>();
   private unsubscribers = new Map<string, () => void>();
 
@@ -226,7 +227,33 @@ export class SubsessionManager {
       this.unsubscribers.delete(id);
       abortCleanup?.();
       this.activeSessions.delete(id);
+      this.activeHandles.delete(id);
     };
+
+    // Build handle and wire cleanup
+    const handle: MinionSessionHandle = {
+      id,
+      path: actualPath,
+      steer: async (text: string) => {
+        await session.steer(text);
+      },
+      abort: () => {
+        session.abort();
+        if (!completed) {
+          completed = true;
+          this.updateStatus(id, "aborted");
+          options.onComplete?.({ exitCode: 1, output: currentFullText });
+          this.eventBus?.emit(MINION_COMPLETE_CHANNEL, {
+            id,
+            exitCode: 1,
+            output: currentFullText,
+          });
+        }
+        cleanup();
+      },
+    };
+
+    this.activeHandles.set(id, handle);
 
     // Start the session with the initial task
     session
@@ -266,27 +293,7 @@ export class SubsessionManager {
 
     logger.debug("subsession", "created", { id, name, path: actualPath });
 
-    return {
-      id,
-      path: actualPath,
-      steer: async (text: string) => {
-        await session.steer(text);
-      },
-      abort: () => {
-        session.abort();
-        if (!completed) {
-          completed = true;
-          this.updateStatus(id, "aborted");
-          options.onComplete?.({ exitCode: 1, output: currentFullText });
-          this.eventBus?.emit(MINION_COMPLETE_CHANNEL, {
-            id,
-            exitCode: 1,
-            output: currentFullText,
-          });
-        }
-        cleanup();
-      },
-    };
+    return handle;
   }
 
   private async waitForAsyncTools(
@@ -391,6 +398,19 @@ export class SubsessionManager {
 
   getSession(id: string): AgentSession | undefined {
     return this.activeSessions.get(id);
+  }
+
+  getSessionHandle(id: string): MinionSessionHandle | undefined {
+    return this.activeHandles.get(id);
+  }
+
+  abortSession(id: string): boolean {
+    const handle = this.activeHandles.get(id);
+    if (handle) {
+      handle.abort();
+      return true;
+    }
+    return false;
   }
 
   /** Check if a session path is a minion session and return the minion ID */

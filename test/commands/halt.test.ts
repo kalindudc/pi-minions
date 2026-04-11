@@ -8,8 +8,27 @@ function createCtx(notifyFn = vi.fn()) {
 }
 
 function createMockSubsessionManager(sessions: Map<string, any> = new Map()) {
+  const abortSession = vi.fn().mockImplementation((id: string) => {
+    const session = sessions.get(id);
+    if (session) {
+      session.abort();
+      return true;
+    }
+    return false;
+  });
   return {
     getSession: vi.fn().mockImplementation((id: string) => sessions.get(id)),
+    getSessionHandle: vi.fn().mockImplementation((id: string) => {
+      const session = sessions.get(id);
+      if (!session) return undefined;
+      return {
+        id,
+        path: `/mock/path/${id}.jsonl`,
+        steer: vi.fn(),
+        abort: () => session.abort(),
+      };
+    }),
+    abortSession,
     updateStatus: vi.fn(),
   } as unknown as SubsessionManager;
 }
