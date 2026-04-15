@@ -266,6 +266,10 @@ async function executeSpawn(
   const failedCount = minions.filter((m) => m.status === "failed").length;
   const finalStatus = coordinator.getStatus(detachedMinions);
   coordinator.emit(true);
+  // Disconnect from parent agent — no more events should propagate after
+  // the tool call returns, otherwise we hit "Agent listener invoked outside
+  // active run" if stale child-session events fire via microtasks.
+  coordinator.disconnect();
 
   const firstMinion = minions[0];
   const finalOutput = coordinator.getOutput();

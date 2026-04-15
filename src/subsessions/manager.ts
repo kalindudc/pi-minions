@@ -134,6 +134,11 @@ export class SubsessionManager {
 
     // Subscribe to session events for progress tracking and completion detection
     const unsubscribe = session.subscribe((event) => {
+      // After completion/abort, drop all events — the parent tool call has
+      // already returned and emitting into it would throw
+      // "Agent listener invoked outside active run".
+      if (completed) return;
+
       // Emit progress via EventBus for parent monitoring
       this.emitProgress(id, event);
 
@@ -195,9 +200,11 @@ export class SubsessionManager {
     let abortCleanup: (() => void) | undefined;
     if (signal) {
       const onAbort = () => {
+        // Set completed BEFORE abort so any synchronous events from
+        // session.abort() are dropped by the subscribe guard above.
+        completed = true;
         session.abort();
         this.updateStatus(id, "aborted");
-        completed = true;
         options.onComplete?.({ exitCode: 1, output: currentFullText });
         this.eventBus?.emit(MINION_COMPLETE_CHANNEL, {
           id,

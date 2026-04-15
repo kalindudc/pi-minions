@@ -63,6 +63,39 @@ describe("BatchCoordinator", () => {
     coordinator.stop();
   });
 
+  it("does not invoke onUpdate after disconnect()", () => {
+    const minions = [makeMinion({ status: "completed" })];
+    const onUpdate = vi.fn();
+    const coordinator = createCoordinator(minions, onUpdate);
+
+    coordinator.stop();
+    coordinator.emit(true); // final forced emit before disconnect
+    const callsBeforeDisconnect = onUpdate.mock.calls.length;
+
+    coordinator.disconnect();
+    coordinator.emit(true); // stale event after disconnect
+
+    expect(onUpdate.mock.calls.length).toBe(callsBeforeDisconnect);
+  });
+
+  it("does not invoke onUpdate from spinner after disconnect()", () => {
+    const minions = [makeMinion({ status: "running" })];
+    const onUpdate = vi.fn();
+    const coordinator = createCoordinator(minions, onUpdate);
+    coordinator.start();
+
+    // Let some spinner ticks fire
+    vi.advanceTimersByTime(200);
+    const callsBefore = onUpdate.mock.calls.length;
+
+    coordinator.disconnect();
+    vi.advanceTimersByTime(500);
+
+    // No new calls after disconnect — spinner still ticks but onUpdate is gone
+    expect(onUpdate.mock.calls.length).toBe(callsBefore);
+    coordinator.stop();
+  });
+
   it("does not leak the interval after stop() is called", () => {
     const minions = [makeMinion({ status: "running" })];
     const coordinator = createCoordinator(minions);

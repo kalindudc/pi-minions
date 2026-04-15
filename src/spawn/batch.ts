@@ -66,6 +66,13 @@ export class BatchCoordinator {
     }
   }
 
+  /** Permanently disconnect from the parent agent's onUpdate callback.
+   *  Call this after the final forced emit, before returning from the tool.
+   *  Prevents stale events from reaching the parent after the tool call ends. */
+  disconnect(): void {
+    this.onUpdate = undefined;
+  }
+
   emit(force = false): void {
     if (this.completed && !force) return;
 

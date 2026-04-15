@@ -322,6 +322,151 @@ describe("SubsessionManager", () => {
     });
   });
 
+  describe("post-completion event silencing", () => {
+    it("does not invoke callbacks for events after agent_end", async () => {
+      let capturedSubscriber: ((event: any) => void) | undefined;
+
+      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      vi.mocked(createAgentSession).mockImplementationOnce(
+        async () =>
+          ({
+            session: {
+              subscribe: (cb: (event: any) => void) => {
+                capturedSubscriber = cb;
+                return () => {};
+              },
+              abort: vi.fn(),
+              prompt: vi.fn().mockReturnValue(new Promise(() => {})), // never resolves
+              state: { messages: [] },
+              getSessionStats: vi.fn().mockReturnValue({
+                tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                cost: 0,
+              }),
+              bindExtensions: vi.fn().mockResolvedValue(undefined),
+            },
+          }) as any,
+      );
+
+      const onToolActivity = vi.fn();
+      const onTextDelta = vi.fn();
+      const onComplete = vi.fn();
+
+      await manager.create({
+        id: "silence-test",
+        name: "test-minion",
+        task: "test",
+        config: {
+          name: "test",
+          description: "Test",
+          systemPrompt: "test",
+          source: "ephemeral" as const,
+          filePath: "",
+        },
+        spawnedBy: "tc",
+        cwd: tempDir,
+        modelRegistry: {} as any,
+        onToolActivity,
+        onTextDelta,
+        onComplete,
+      });
+
+      expect(capturedSubscriber).toBeDefined();
+
+      // Simulate agent_end
+      capturedSubscriber!({ type: "agent_end" });
+      expect(onComplete).toHaveBeenCalledOnce();
+
+      // Now fire stale events that would arrive after completion
+      onToolActivity.mockClear();
+      onTextDelta.mockClear();
+      onComplete.mockClear();
+
+      capturedSubscriber!({
+        type: "tool_execution_start",
+        toolName: "bash",
+        args: { command: "ls" },
+      });
+      capturedSubscriber!({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "stale" },
+      });
+      capturedSubscriber!({ type: "agent_end" });
+
+      // None of the stale events should have triggered callbacks
+      expect(onToolActivity).not.toHaveBeenCalled();
+      expect(onTextDelta).not.toHaveBeenCalled();
+      expect(onComplete).not.toHaveBeenCalled();
+    });
+
+    it("does not invoke callbacks for events after abort", async () => {
+      let capturedSubscriber: ((event: any) => void) | undefined;
+      const abortMock = vi.fn();
+
+      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      vi.mocked(createAgentSession).mockImplementationOnce(
+        async () =>
+          ({
+            session: {
+              subscribe: (cb: (event: any) => void) => {
+                capturedSubscriber = cb;
+                return () => {};
+              },
+              abort: abortMock,
+              prompt: vi.fn().mockReturnValue(new Promise(() => {})), // never resolves
+              state: { messages: [] },
+              getSessionStats: vi.fn().mockReturnValue({
+                tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                cost: 0,
+              }),
+              bindExtensions: vi.fn().mockResolvedValue(undefined),
+            },
+          }) as any,
+      );
+
+      const controller = new AbortController();
+      const onToolActivity = vi.fn();
+      const onComplete = vi.fn();
+
+      await manager.create({
+        id: "abort-silence-test",
+        name: "test-minion",
+        task: "test",
+        config: {
+          name: "test",
+          description: "Test",
+          systemPrompt: "test",
+          source: "ephemeral" as const,
+          filePath: "",
+        },
+        spawnedBy: "tc",
+        cwd: tempDir,
+        modelRegistry: {} as any,
+        signal: controller.signal,
+        onToolActivity,
+        onComplete,
+      });
+
+      expect(capturedSubscriber).toBeDefined();
+
+      // Abort the session
+      controller.abort();
+      expect(onComplete).toHaveBeenCalledOnce();
+
+      // Fire stale events after abort
+      onToolActivity.mockClear();
+      onComplete.mockClear();
+
+      capturedSubscriber!({
+        type: "tool_execution_start",
+        toolName: "bash",
+        args: { command: "ls" },
+      });
+
+      // Stale event should be silenced
+      expect(onToolActivity).not.toHaveBeenCalled();
+    });
+  });
+
   describe("usage update on turn end", () => {
     it("calls onUsageUpdate with stats from getSessionStats when session emits turn_end", async () => {
       let capturedSubscriber: ((event: any) => void) | undefined;
@@ -336,7 +481,7 @@ describe("SubsessionManager", () => {
                 return () => {};
               },
               abort: vi.fn(),
-              prompt: vi.fn().mockResolvedValue(undefined),
+              prompt: vi.fn().mockReturnValue(new Promise(() => {})), // keep session alive
               state: { messages: [] },
               getSessionStats: vi.fn().mockReturnValue({
                 tokens: {
