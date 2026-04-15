@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-04-15
+
+- fix: prevent stale child-session events from crashing parent agent
+- chore: bump basic-ftp dependency
+
 ## [0.16.0] - 2026-04-11
 
 - BREAKING CHANGE: rename `list_minions` to `list_minion_types` for listing available agent types
