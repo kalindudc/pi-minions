@@ -197,7 +197,7 @@ async function executeSpawn(
 
   // Add all to tree
   for (const m of minions) {
-    tree.add(m.id, m.name, m.task, undefined, m.agentName);
+    tree.add(m.id, m.name, m.task, undefined, m.agentName, m.model);
   }
 
   // Shared abort controller
@@ -611,7 +611,7 @@ export function spawnBg(
       task: params.task,
     });
 
-    tree.add(id, name, params.task, undefined, params.agent ?? "ephemeral");
+    tree.add(id, name, params.task, undefined, params.agent ?? "ephemeral", resolvedModel);
     tree.markDetached(id);
 
     const controller = new AbortController();

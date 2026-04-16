@@ -68,6 +68,8 @@ export interface AgentNode {
   detached?: boolean;
   /** True if brought back to foreground (converted from bg to true fg) */
   foregrounded?: boolean;
+  /** Model used by this minion */
+  model?: string;
 }
 
 export interface QueuedResult {

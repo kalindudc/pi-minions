@@ -255,7 +255,8 @@ class MinionObservabilityWidget {
       node?.agentName && node.agentName !== "ephemeral"
         ? `${node.agentName} ${this.minionName}`
         : this.minionName;
-    const headerText = `${badge} ${displayName} (${this.minionId})`;
+    const modelTag = node?.model ? ` [${node.model}]` : "";
+    const headerText = `${badge} ${displayName} (${this.minionId})${modelTag}`;
     const helpText = "q/esc:close · tab/shift+tab:navigate";
 
     // Header with accent for badge+name, dim for help

@@ -61,9 +61,18 @@ export function formatUsage(usage: UsageStats, model?: string): string {
 export function renderCall(args: Record<string, unknown>, theme: Theme, _ctx: unknown): Text {
   if (args.tasks && Array.isArray(args.tasks) && args.tasks.length > 1) {
     const n = args.tasks.length;
+    const taskModels = (args.tasks as Array<{ model?: string }>)
+      .map((t) => t.model)
+      .filter(Boolean);
+    const uniqueModels = new Set(taskModels);
+    const modelHint =
+      uniqueModels.size === 1 ? ` [${[...uniqueModels][0]}]` : "";
 
     let text = theme.fg("toolTitle", theme.bold("spawn "));
     text += theme.fg("accent", `[${n} minion${n !== 1 ? "s" : ""}]`);
+    if (modelHint) {
+      text += theme.fg("dim", modelHint);
+    }
 
     return new Text(text, 0, 0);
   }
@@ -173,7 +182,8 @@ export function renderResult(
 
   // Add footer with usage info for batch spawns
   if (details.isBatch && details.minions && details.minions.length > 1) {
-    const model = details.minions[0].model;
+    const uniqueModels = new Set(details.minions.map((m) => m.model).filter(Boolean));
+    const model = uniqueModels.size === 1 ? [...uniqueModels][0] : undefined;
     const usage = {
       turns: details.minions.reduce((sum, m) => sum + m.usage.turns, 0),
       input: details.minions.reduce((sum, m) => sum + m.usage.input, 0),

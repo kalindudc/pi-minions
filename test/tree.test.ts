@@ -229,6 +229,18 @@ describe("setActivityHistory", () => {
   });
 });
 
+describe("model storage", () => {
+  it("stores model when provided to add()", () => {
+    tree.add("a", "kevin", "do stuff", undefined, "ephemeral", "gpt-4");
+    expect(tree.get("a")?.model).toBe("gpt-4");
+  });
+
+  it("model is undefined when not provided", () => {
+    tree.add("a", "kevin", "do stuff");
+    expect(tree.get("a")?.model).toBeUndefined();
+  });
+});
+
 describe("onChange", () => {
   it("fires on add", () => {
     const tree = new AgentTree();

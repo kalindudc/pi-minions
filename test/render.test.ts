@@ -156,6 +156,40 @@ describe("renderCall", () => {
     expect(text).toContain("[3 minions]");
   });
 
+  it("batch call header shows model when all tasks use the same model", () => {
+    const result = renderCall(
+      {
+        tasks: [
+          { task: "t1", model: "gpt-4" },
+          { task: "t2", model: "gpt-4" },
+          { task: "t3", model: "gpt-4" },
+        ],
+      },
+      theme,
+      {},
+    );
+    const text = result.render(100).join("\n");
+    expect(text).toContain("[3 minions]");
+    expect(text).toContain("gpt-4");
+  });
+
+  it("batch call header shows no model when tasks use different models", () => {
+    const result = renderCall(
+      {
+        tasks: [
+          { task: "t1", model: "gpt-4" },
+          { task: "t2", model: "claude-4" },
+        ],
+      },
+      theme,
+      {},
+    );
+    const text = result.render(100).join("\n");
+    expect(text).toContain("[2 minions]");
+    expect(text).not.toContain("gpt-4");
+    expect(text).not.toContain("claude-4");
+  });
+
   it("truncates long task previews", () => {
     const longTask = "a".repeat(100);
     const result = renderCall({ task: longTask }, theme, {});
@@ -444,6 +478,199 @@ describe("renderResult", () => {
     expect(text).not.toContain("[oo]"); // No spinner for completed
     expect(text).toContain("kevin");
     expect(text).toContain("bob");
+  });
+
+  it("batch render shows model per minion when models differ", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "ephemeral",
+          task: "t1",
+          status: "running",
+          usage: emptyUsage(),
+          model: "gpt-4",
+          finalOutput: "",
+          spinnerFrame: 0,
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "ephemeral",
+          task: "t2",
+          status: "running",
+          usage: emptyUsage(),
+          model: "claude-4",
+          finalOutput: "",
+          spinnerFrame: 0,
+        },
+      ],
+      status: "running",
+      usage: emptyUsage(),
+      finalOutput: "",
+      spinnerFrame: 0,
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: true },
+      theme,
+      { isError: false },
+    );
+    const text = result.render(100).join("\n");
+    expect(text).toContain("gpt-4");
+    expect(text).toContain("claude-4");
+  });
+
+  it("batch render omits per-minion model when all models are the same", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "ephemeral",
+          task: "t1",
+          status: "running",
+          usage: emptyUsage(),
+          model: "claude-4",
+          finalOutput: "",
+          spinnerFrame: 0,
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "ephemeral",
+          task: "t2",
+          status: "running",
+          usage: emptyUsage(),
+          model: "claude-4",
+          finalOutput: "",
+          spinnerFrame: 0,
+        },
+      ],
+      status: "running",
+      usage: emptyUsage(),
+      finalOutput: "",
+      spinnerFrame: 0,
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: true },
+      theme,
+      { isError: false },
+    );
+    const text = result.render(100).join("\n");
+    // Per-minion model labels should NOT appear when all same
+    // Count occurrences of "claude-4" — should be 0 in the batch lines
+    // (model only appears in the footer, not per-line)
+    const lines = text.split("\n");
+    const minionLines = lines.filter((l) => l.includes("kevin") || l.includes("bob"));
+    for (const line of minionLines) {
+      expect(line).not.toContain("claude-4");
+    }
+  });
+
+  it("batch footer shows mixed model info when models differ", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "ephemeral",
+          task: "t1",
+          status: "completed",
+          usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0.001, contextTokens: 120, turns: 1 },
+          model: "gpt-4",
+          finalOutput: "done",
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "ephemeral",
+          task: "t2",
+          status: "completed",
+          usage: { input: 200, output: 40, cacheRead: 0, cacheWrite: 0, cost: 0.002, contextTokens: 240, turns: 2 },
+          model: "claude-4",
+          finalOutput: "done2",
+        },
+      ],
+      status: "completed",
+      usage: emptyUsage(),
+      finalOutput: "",
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: false },
+    );
+    const text = result.render(100).join("\n");
+    // Per-minion lines DO show models (that's correct for mixed models)
+    // But the footer usage line should NOT show a single model
+    const lines = text.split("\n");
+    const footerLine = lines.find((l) => l.includes("turns") && l.includes("↑"));
+    expect(footerLine).toBeDefined();
+    expect(footerLine).not.toContain("gpt-4");
+    expect(footerLine).not.toContain("claude-4");
+  });
+
+  it("batch footer shows model in usage when all models are the same", () => {
+    const details: SpawnToolDetails = {
+      id: "batch-123",
+      name: "batch-batch-123",
+      agentName: "batch",
+      task: "batch of 2 minions",
+      isBatch: true,
+      minions: [
+        {
+          id: "1",
+          name: "kevin",
+          agentName: "ephemeral",
+          task: "t1",
+          status: "completed",
+          usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0.001, contextTokens: 120, turns: 1 },
+          model: "claude-4",
+          finalOutput: "done",
+        },
+        {
+          id: "2",
+          name: "bob",
+          agentName: "ephemeral",
+          task: "t2",
+          status: "completed",
+          usage: { input: 200, output: 40, cacheRead: 0, cacheWrite: 0, cost: 0.002, contextTokens: 240, turns: 2 },
+          model: "claude-4",
+          finalOutput: "done2",
+        },
+      ],
+      status: "completed",
+      usage: emptyUsage(),
+      finalOutput: "",
+    };
+    const result = renderResult(
+      { content: [], details },
+      { expanded: false, isPartial: false },
+      theme,
+      { isError: false },
+    );
+    const text = result.render(100).join("\n");
+    // Footer usage should include the model name
+    expect(text).toContain("claude-4");
   });
 
   it("batch render shows X marks for failed minions", () => {

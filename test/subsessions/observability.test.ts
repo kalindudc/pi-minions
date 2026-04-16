@@ -251,6 +251,30 @@ describe("showMinionObservability", () => {
   });
 
   describe("widget rendering", () => {
+    it("shows model in header when minion has model set", async () => {
+      tree.add("minion-abc123", "kevin", "test task", undefined, "ephemeral", "claude-4");
+
+      showMinionObservability(ctx, tree, eventBus, "minion-abc123");
+
+      // Get the widget render function
+      const renderCall = vi.mocked(ctx.ui.setWidget).mock.calls[0];
+      const renderFn = renderCall?.[1] as Function | undefined;
+      expect(renderFn).toBeDefined();
+
+      const mockTUI = { requestRender: vi.fn() };
+      const mockTheme = createMockTheme();
+      const textComponent = renderFn?.(mockTUI, mockTheme);
+      expect(textComponent).toBeDefined();
+
+      // The rendered text should contain the model
+      const rendered = textComponent.render(100);
+      const text = rendered.join("\n");
+      expect(text).toContain("claude-4");
+
+      // Cleanup
+      inputHandler?.("q");
+    });
+
     it("shows minion name and truncated ID in header", async () => {
       tree.add("minion-abc123", "kevin", "test task");
 

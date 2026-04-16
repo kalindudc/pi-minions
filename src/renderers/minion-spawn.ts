@@ -48,6 +48,9 @@ export function renderBatchMinions(
   const minions = data.minions ?? [];
   const spinnerFrames = data.spinnerFrames;
 
+  const uniqueModels = new Set(minions.map((m) => m.model).filter(Boolean));
+  const showModels = uniqueModels.size > 1;
+
   const lines: string[] = [];
 
   for (const m of minions) {
@@ -94,6 +97,11 @@ export function renderBatchMinions(
     }
 
     line += ` ${theme.fg(color, m.name)}`;
+
+    // Show model per-minion only when models differ across batch
+    if (showModels && m.model) {
+      line += ` ${theme.fg("dim", `[${m.model}]`)}`;
+    }
 
     if (isDetached) {
       line += ` ${theme.fg("dim", "sent to background")}`;

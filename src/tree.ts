@@ -16,12 +16,13 @@ export class AgentTree {
     for (const listener of this.listeners) listener();
   }
 
-  add(id: string, name: string, task: string, parentId?: string, agentName?: string): AgentNode {
+  add(id: string, name: string, task: string, parentId?: string, agentName?: string, model?: string): AgentNode {
     const node: AgentNode = {
       id,
       name,
       agentName,
       task,
+      model,
       status: "running",
       parentId,
       children: [],
