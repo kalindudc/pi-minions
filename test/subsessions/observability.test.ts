@@ -372,6 +372,98 @@ describe("activity history preloading", () => {
   });
 });
 
+describe("history trimming does not duplicate turns", () => {
+  let tree: AgentTree;
+  let eventBus: EventBus;
+  let ctx: ExtensionContext;
+  let inputHandler: ((data: string) => { consume: boolean }) | null = null;
+
+  beforeEach(() => {
+    tree = new AgentTree();
+    eventBus = new EventBus();
+    ctx = createMockContext("/tmp");
+    inputHandler = null;
+
+    vi.mocked(ctx.ui.onTerminalInput).mockImplementation((handler) => {
+      inputHandler = handler as (data: string) => { consume: boolean };
+      return () => {
+        inputHandler = null;
+      };
+    });
+  });
+
+  function getRenderedLines(): string[] {
+    const calls = vi.mocked(ctx.ui.setWidget).mock.calls;
+    const lastCall = calls[calls.length - 1];
+    const renderFn = lastCall?.[1] as Function | undefined;
+    if (!renderFn) return [];
+
+    const mockTUI = { requestRender: vi.fn() };
+    const mockTheme = createMockTheme();
+    const textComponent = renderFn(mockTUI, mockTheme);
+    // Text component renders lines; first 2 are header + separator
+    return textComponent.render(200);
+  }
+
+  it("does not repeat history entries after messages are trimmed", async () => {
+    tree.add("minion-123", "kevin", "test task");
+    // maxVisibleMessages defaults to 6
+
+    showMinionObservability(ctx, tree, eventBus, "minion-123");
+
+    // Log enough activities to exceed the visible limit and force trimming
+    for (let i = 1; i <= 10; i++) {
+      tree.logActivity("minion-123", `turn ${i}`);
+    }
+
+    const lines = getRenderedLines();
+    // Strip header + separator (first 2 lines), keep only message lines
+    const messageLines = lines.slice(2);
+
+    // Each turn text should appear at most once
+    const seen = new Set<string>();
+    const duplicates: string[] = [];
+    for (const line of messageLines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (seen.has(trimmed)) duplicates.push(trimmed);
+      seen.add(trimmed);
+    }
+
+    expect(duplicates).toEqual([]);
+
+    // The most recent turns should be visible (newest at bottom)
+    const joinedLines = messageLines.join("\n");
+    expect(joinedLines).toContain("turn 10");
+
+    inputHandler?.("q");
+  });
+
+  it("shows latest entries without gaps after many rapid logActivity calls", async () => {
+    tree.add("minion-123", "kevin", "test task");
+
+    showMinionObservability(ctx, tree, eventBus, "minion-123");
+
+    // Rapid-fire 20 activities
+    for (let i = 1; i <= 20; i++) {
+      tree.logActivity("minion-123", `step ${i}`);
+    }
+
+    const lines = getRenderedLines();
+    const messageLines = lines.slice(2).filter((l: string) => l.trim());
+
+    // Should show the most recent entries, no duplicates
+    const texts = messageLines.map((l: string) => l.trim());
+    const uniqueTexts = [...new Set(texts)];
+    expect(texts).toEqual(uniqueTexts);
+
+    // The very last entry should be present
+    expect(texts).toContain("step 20");
+
+    inputHandler?.("q");
+  });
+});
+
 describe("hideObservability", () => {
   it("removes the observability widget", () => {
     const ctx = createMockContext("/tmp");

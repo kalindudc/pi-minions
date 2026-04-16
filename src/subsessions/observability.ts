@@ -59,6 +59,7 @@ type ActivityMessage = {
 
 class MinionObservabilityWidget {
   private messages: ActivityMessage[] = [];
+  private historyIndex = 0;
   private unsubscribeEventBus: (() => void) | null = null;
   private unsubscribeTree: (() => void) | null = null;
   private onClose: () => void;
@@ -115,9 +116,10 @@ class MinionObservabilityWidget {
       const node = this.tree.get(this.minionId);
       if (!node) return;
       const history = node.activityHistory || [];
-      if (history.length > this.messages.length) {
-        for (let i = this.messages.length; i < history.length; i++)
+      if (history.length > this.historyIndex) {
+        for (let i = this.historyIndex; i < history.length; i++)
           this.messages.push({ text: history[i] ?? "" });
+        this.historyIndex = history.length;
         this.trimMessages();
         this.triggerUpdate();
         return;
@@ -129,6 +131,7 @@ class MinionObservabilityWidget {
     const historyNode = this.tree.get(this.minionId);
     if (historyNode?.activityHistory) {
       for (const activity of historyNode.activityHistory) this.messages.push({ text: activity });
+      this.historyIndex = historyNode.activityHistory.length;
       this.trimMessages();
     }
 

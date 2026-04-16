@@ -155,15 +155,10 @@ export async function runMinionSession(
             toolSyncMaxWait: opts.toolSyncMaxWait,
             interactionTimeout: opts.interactionTimeout,
 
-            // Wire callbacks to update BOTH systems
+            // Transcript logging + forward to caller callbacks
+            // Tree updates are the caller's responsibility (via opts callbacks)
             onToolActivity: (activity) => {
               transcript.write(`\n[tool:${activity.type}] ${activity.toolName}`);
-
-              // Update AgentTree for UI
-              if (activity.type === "start") {
-                tree?.logActivity(id, `→ ${activity.toolName}`);
-              }
-
               opts.onToolActivity?.(activity);
             },
 
@@ -174,11 +169,6 @@ export async function runMinionSession(
 
             onTextDelta: (delta, fullText) => {
               finalOutput = fullText;
-
-              // Update AgentTree activity
-              const preview = fullText.split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? "";
-              tree?.updateActivity(id, preview);
-
               opts.onTextDelta?.(delta, fullText);
             },
 
@@ -190,9 +180,6 @@ export async function runMinionSession(
             onTurnEnd: (count) => {
               turnCount = count;
               transcript.write(`\n--- turn ${count} ---`);
-
-              // Update AgentTree
-              tree?.logActivity(id, `turn ${count}`);
 
               // Step limit enforcement
               if (config.steps !== undefined && count >= config.steps && !stepLimitReached) {
