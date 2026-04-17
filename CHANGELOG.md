@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-04-17
+
+- fix: eliminate duplicate turns in observability widget
+- fix: display model labels in batch spawn and minion UI
+
 ## [0.16.1] - 2026-04-15
 
 - fix: prevent stale child-session events from crashing parent agent
