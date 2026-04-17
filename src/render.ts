@@ -65,8 +65,7 @@ export function renderCall(args: Record<string, unknown>, theme: Theme, _ctx: un
       .map((t) => t.model)
       .filter(Boolean);
     const uniqueModels = new Set(taskModels);
-    const modelHint =
-      uniqueModels.size === 1 ? ` [${[...uniqueModels][0]}]` : "";
+    const modelHint = uniqueModels.size === 1 ? ` [${[...uniqueModels][0]}]` : "";
 
     let text = theme.fg("toolTitle", theme.bold("spawn "));
     text += theme.fg("accent", `[${n} minion${n !== 1 ? "s" : ""}]`);
