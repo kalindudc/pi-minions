@@ -31,6 +31,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
       { name: "edit", description: "Edit files" },
     ]),
     bindExtensions: vi.fn().mockResolvedValue(undefined),
+    setActiveToolsByName: vi.fn(),
   };
 
   const mockSessionManager = {
@@ -1032,6 +1033,65 @@ describe("SubsessionManager", () => {
       // Should return instantly — getAllTools never called for polling
       expect(Date.now() - start).toBeLessThan(1000);
       expect(getAllToolsMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("tool filtering via AgentConfig.tools", () => {
+    it("calls setActiveToolsByName when config.tools is set", async () => {
+      const manager = new SubsessionManager(tempDir, join(tempDir, "parent.jsonl"));
+      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const mockSession = (await (createAgentSession as any)()).session;
+      mockSession.setActiveToolsByName.mockClear();
+
+      await manager.create({
+        id: "tool-filter-1",
+        name: "filtered",
+        task: "test",
+        config: {
+          name: "scout",
+          description: "Recon agent",
+          systemPrompt: "You are a scout.",
+          source: "user",
+          filePath: "/tmp/scout.md",
+          tools: ["read", "bash"],
+        },
+        spawnedBy: "test",
+        cwd: tempDir,
+        modelRegistry: {} as any,
+        parentModel: undefined as any,
+        toolSyncEnabled: false,
+        onComplete: vi.fn(),
+      });
+
+      expect(mockSession.setActiveToolsByName).toHaveBeenCalledWith(["read", "bash"]);
+    });
+
+    it("does not call setActiveToolsByName when config.tools is undefined", async () => {
+      const manager = new SubsessionManager(tempDir, join(tempDir, "parent.jsonl"));
+      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const mockSession = (await (createAgentSession as any)()).session;
+      mockSession.setActiveToolsByName.mockClear();
+
+      await manager.create({
+        id: "tool-filter-2",
+        name: "unfiltered",
+        task: "test",
+        config: {
+          name: "scout",
+          description: "Recon agent",
+          systemPrompt: "You are a scout.",
+          source: "user",
+          filePath: "/tmp/scout.md",
+        },
+        spawnedBy: "test",
+        cwd: tempDir,
+        modelRegistry: {} as any,
+        parentModel: undefined as any,
+        toolSyncEnabled: false,
+        onComplete: vi.fn(),
+      });
+
+      expect(mockSession.setActiveToolsByName).not.toHaveBeenCalled();
     });
   });
 });

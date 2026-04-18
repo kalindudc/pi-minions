@@ -124,6 +124,11 @@ export class SubsessionManager {
       await this.waitForAsyncTools(id, session, options.parentToolNames, options.toolSyncMaxWait);
     }
 
+    // Filter active tools if the agent config specifies a tool allowlist
+    if (config.tools && config.tools.length > 0) {
+      session.setActiveToolsByName(config.tools);
+    }
+
     // Store the session for steer/halt operations
     this.activeSessions.set(id, session);
 
