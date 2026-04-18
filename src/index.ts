@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Model } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { discoverAgents } from "./agents.js";
 import { createHaltHandler } from "./commands/halt.js";
 import { createMinionsHandler } from "./commands/minions.js";
 import { createSpawnHandler } from "./commands/spawn.js";
@@ -332,6 +333,33 @@ export default function (pi: ExtensionAPI): void {
         tree,
       }),
     );
+  });
+
+  pi.on("before_agent_start", async (_event, ctx) => {
+    const { agents } = discoverAgents(ctx.cwd, "both");
+    if (agents.length === 0) return {};
+
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const lines: string[] = [
+      "",
+      "",
+      "The following agents are available for task delegation via the spawn tool.",
+      "",
+      "<available_agents>",
+    ];
+    for (const a of agents) {
+      const model = a.model ? ` [model: ${a.model}]` : "";
+      lines.push("  <agent>");
+      lines.push(`    <name>${esc(a.name)}</name>`);
+      lines.push(`    <description>${esc(a.description)}${esc(model)}</description>`);
+      lines.push(`    <source>${esc(a.source)}</source>`);
+      lines.push("  </agent>");
+    }
+    lines.push("</available_agents>");
+
+    return { systemPrompt: _event.systemPrompt + lines.join("\n") };
   });
 
   pi.on("model_select", async (event, ctx) => {
