@@ -63,9 +63,9 @@
 
 ### quality control
 - [x] improve default prompt of generic minions to limit verbosity
+- [x] automatic delegation instructions for parent sessions
 - [ ] error recovery with retry mechanisms (user confirmation)
 - [ ] better error messages with actionable suggestions
-- [ ] automatic delegation instructions for parent sessions
 - [ ] minion templates/presets for common tasks
 - [ ] more variety of built-in minions with hints for delegation
 - [ ] conflict detection when minions work on same files
