@@ -6,6 +6,8 @@ import { getAgentDir } from "@mariozechner/pi-coding-agent";
 export interface PiMinionsConfig {
   /** Custom minion names (defaults to built-in pool) */
   minionNames?: string[];
+  /** Allow spawning ephemeral (unnamed) minions (default: true) */
+  allowEphemeral?: boolean;
   /** Delegation behavior settings */
   delegation?: DelegationConfig;
   /** Display/rendering settings */
@@ -51,6 +53,7 @@ export interface DisplayConfig {
 /** Fully resolved config with all defaults applied */
 export interface ResolvedConfig {
   minionNames: string[];
+  allowEphemeral: boolean;
   delegation: Required<DelegationConfig>;
   display: Required<DisplayConfig>;
   toolSync: Required<ToolSyncConfig>;
@@ -204,6 +207,7 @@ export function getConfig(ctx: ExtensionContext): ResolvedConfig {
   const user = settings["pi-minions"] ?? {};
   return {
     minionNames: [...(user.minionNames ?? DEFAULT_MINION_NAMES)],
+    allowEphemeral: user.allowEphemeral ?? true,
     delegation: {
       enabled: user.delegation?.enabled ?? true,
       toolCallThreshold: user.delegation?.toolCallThreshold ?? 16,

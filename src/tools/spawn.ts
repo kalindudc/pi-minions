@@ -151,6 +151,18 @@ async function executeSpawn(
   const spinnerFrames = piConfig.display.spinnerFrames;
   const outputPreviewLines = piConfig.display.outputPreviewLines;
 
+  // Enforce ephemeral restriction
+  if (!piConfig.allowEphemeral) {
+    const ephemeralSpecs = specs.filter((s) => !s.agent);
+    if (ephemeralSpecs.length > 0) {
+      const { agents } = discoverAgents(ctx.cwd, "both");
+      const available = agents.map((a) => `- ${a.name}: ${a.description}`).join("\n");
+      throw new Error(
+        `Ephemeral minions are disabled. You must specify a named agent.\n\nAvailable agents:\n${available || "(none found)"}`,
+      );
+    }
+  }
+
   logger.info("spawn:tool", isSingleMinion ? "start" : "batch-start", {
     count: specs.length,
   });
@@ -603,6 +615,15 @@ export function spawnBg(
 
     const resolvedModel = params.model ?? config.model ?? ctx.model?.id;
     const piConfig = getConfig(ctx);
+
+    // Enforce ephemeral restriction
+    if (!piConfig.allowEphemeral && !params.agent) {
+      const { agents } = discoverAgents(ctx.cwd, "both");
+      const available = agents.map((a) => `- ${a.name}: ${a.description}`).join("\n");
+      throw new Error(
+        `Ephemeral minions are disabled. You must specify a named agent.\n\nAvailable agents:\n${available || "(none found)"}`,
+      );
+    }
 
     logger.info("spawn:tool", "start-bg", {
       id,

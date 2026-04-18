@@ -28,9 +28,13 @@ vi.mock("../../src/version.js", () => ({
 }));
 
 // Mock fs module
-vi.mock("node:fs", () => ({
-  readFileSync: vi.fn().mockReturnValue("# Mock Changelog"),
-}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    readFileSync: vi.fn().mockReturnValue("# Mock Changelog"),
+  };
+});
 
 function createMockEventBus(): EventBus {
   return new EventBus();
@@ -80,6 +84,7 @@ function mockSession() {
 
 function createMockContext(overrides?: Partial<ExtensionCommandContext>): ExtensionCommandContext {
   return {
+    cwd: "/tmp",
     ui: {
       notify: vi.fn(),
     },

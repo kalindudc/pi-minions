@@ -18,8 +18,16 @@ vi.mock("../../src/agents.js", () => ({
 vi.mock("../../src/spawn.js", () => ({
   runMinionSession: vi.fn(),
 }));
+vi.mock("../../src/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config.js")>();
+  return {
+    ...actual,
+    getConfig: vi.fn(actual.getConfig),
+  };
+});
 
 import { discoverAgents } from "../../src/agents.js";
+import { getConfig } from "../../src/config.js";
 import { runMinionSession } from "../../src/spawn.js";
 import { detachMinion, spawn, spawnBg } from "../../src/tools/spawn.js";
 import { emptyUsage } from "../../src/types.js";
@@ -1420,5 +1428,109 @@ describe("spawnBg — foreground attachment", () => {
 
     // sendMessage was already called during completion
     expect(pi.sendMessage).toHaveBeenCalled();
+  });
+});
+
+describe("ephemeral restriction (allowEphemeral: false)", () => {
+  function configWithEphemeralDisabled() {
+    vi.mocked(getConfig).mockReturnValue({
+      minionNames: ["test"],
+      allowEphemeral: false,
+      delegation: { enabled: true, toolCallThreshold: 16, hintIntervalMinutes: 8 },
+      display: {
+        outputPreviewLines: 20,
+        observabilityLines: 6,
+        showStatusHints: true,
+        spinnerFrames: ["[oo]"],
+      },
+      toolSync: { enabled: true, maxWait: 5 },
+      interaction: { timeout: 300 },
+    });
+  }
+
+  afterEach(() => {
+    vi.mocked(getConfig).mockRestore();
+  });
+
+  it("spawn rejects ephemeral minion when disabled", async () => {
+    configWithEphemeralDisabled();
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const execute = spawn(tree, queue, pi, subsessionManager);
+
+    await expect(
+      execute("tc", { task: "do something" }, undefined, undefined, createCtx()),
+    ).rejects.toThrow("Ephemeral minions are disabled");
+  });
+
+  it("spawn allows named agent when ephemeral is disabled", async () => {
+    configWithEphemeralDisabled();
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const execute = spawn(tree, queue, pi, subsessionManager);
+
+    const result = await execute(
+      "tc",
+      { task: "do something", agent: "scout" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    expect(result.content[0]).toHaveProperty("text");
+    expect(tree.getRoots()).toHaveLength(1);
+  });
+
+  it("spawn_bg rejects ephemeral minion when disabled", async () => {
+    configWithEphemeralDisabled();
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const execute = spawnBg(tree, queue, pi, subsessionManager);
+
+    await expect(
+      execute("tc", { task: "bg task" }, undefined, undefined, createCtx()),
+    ).rejects.toThrow("Ephemeral minions are disabled");
+  });
+
+  it("spawn_bg allows named agent when ephemeral is disabled", async () => {
+    configWithEphemeralDisabled();
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const execute = spawnBg(tree, queue, pi, subsessionManager);
+
+    const result = await execute(
+      "tc",
+      { task: "bg task", agent: "scout" },
+      undefined,
+      undefined,
+      createCtx(),
+    );
+
+    expect(result.content[0]).toHaveProperty("text");
+    expect(tree.getRoots()).toHaveLength(1);
+  });
+
+  it("batch spawn rejects when any spec lacks an agent", async () => {
+    configWithEphemeralDisabled();
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const execute = spawn(tree, queue, pi, subsessionManager);
+
+    await expect(
+      execute(
+        "tc",
+        {
+          tasks: [{ task: "task1", agent: "scout" }, { task: "task2" }],
+        },
+        undefined,
+        undefined,
+        createCtx(),
+      ),
+    ).rejects.toThrow("Ephemeral minions are disabled");
+  });
+
+  it("error message includes available agent names", async () => {
+    configWithEphemeralDisabled();
+    const { tree, queue, pi, subsessionManager } = createDeps();
+    const execute = spawn(tree, queue, pi, subsessionManager);
+
+    await expect(
+      execute("tc", { task: "do something" }, undefined, undefined, createCtx()),
+    ).rejects.toThrow("scout");
   });
 });
