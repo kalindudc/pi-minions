@@ -86,7 +86,7 @@ export default function (pi: ExtensionAPI): void {
     description:
       "Delegate a task to a named agent or an ephemeral minion with isolated context. " +
       "If no agent name is provided, spawns an ephemeral minion with default capabilities. " +
-      "Agents are discovered from ~/.pi/agent/agents/ and .pi/agents/. " +
+      "Agents are discovered from global and project agent/minion directories, including ~/.pi/agent/{agents,minions}/, ~/.agents/{agents,minions}/, .pi/{agents,minions}/, and .agents/{agents,minions}/. " +
       "The agent runs as a file-based session with parent tracking.",
     promptSnippet: "Spawn a minion for isolated task delegation",
     promptGuidelines: [
