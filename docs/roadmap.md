@@ -72,6 +72,9 @@
 - [ ] validation gates before destructive operations
 - [ ] interactive debugging mode for stuck minions
 
+### development
+- [ ] deprecate Taskfile in favour of npm scripts ("prepare" can replace `task up`)
+
 ### nice to have (v1.x.x)
 - [ ] minion output filtering/search capabilities
 - [ ] minion result comparison tools
