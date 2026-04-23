@@ -56,19 +56,23 @@ Stay focused. You have limited steps — get in, verify, report, get out.
 
 | Location | Scope | Walk-up? | Override priority |
 |----------|-------|----------|-------------------|
-| `~/.pi/agent/agents/` | Global | No | Lowest |
-| `~/.pi/agent/minions/` | Global | No | Low |
-| `~/.agents/agents/` | Global | No | Medium |
-| `.pi/agents/` | Project | Yes (to git root) | High |
-| `.agents/agents/` | Project | Yes (to git root) | Highest |
+| `~/.pi/agent/agents/` | Global | No | 1 (lowest) |
+| `~/.pi/agent/minions/` | Global | No | 2 |
+| `~/.agents/agents/` | Global | No | 3 |
+| `~/.agents/minions/` | Global | No | 4 |
+| `.pi/agents/` | Project | Yes (to git root) | 5 |
+| `.pi/minions/` | Project | Yes (to git root) | 6 |
+| `.agents/agents/` | Project | Yes (to git root) | 7 |
+| `.agents/minions/` | Project | Yes (to git root) | 8 (highest) |
 
 - **Global** agents are available in every project
 - **Project** agents live in the repo and are shared with collaborators
 - Project agents override global agents on name collision
 - "Walk-up" means pi-minions searches from the current directory up to the nearest `.git` root
+- Each discovery directory loads top-level `*.md` files and immediate child folders containing `MINION.md`
 
 > [!TIP]
-> Put team-shared agents in `.pi/agents/` (committed to the repo). Put personal agents in `~/.pi/agent/agents/` or `~/.agents/agents/`.
+> Put team-shared agents in `.pi/agents/` or `.pi/minions/` (committed to the repo). Put personal agents in `~/.pi/agent/agents/`, `~/.pi/agent/minions/`, `~/.agents/agents/`, or `~/.agents/minions/`.
 
 ## Discovering and using agents
 
@@ -79,7 +83,9 @@ The `list_agents` tool (or natural language like "what agents are available?") s
 ```bash
 # LLM calls list_agents automatically, or check manually:
 ls ~/.pi/agent/agents/
+ls ~/.pi/agent/minions/
 ls .pi/agents/
+ls .pi/minions/
 ```
 
 ### Spawn a named agent

@@ -220,10 +220,13 @@ Named agents are markdown files with YAML frontmatter discovered from multiple d
 | 1 (lowest) | `~/.pi/agent/agents/` | Global |
 | 2 | `~/.pi/agent/minions/` | Global |
 | 3 | `~/.agents/agents/` | Global |
-| 4 | `.pi/agents/` | Project (walks up to git root) |
-| 5 (highest) | `.agents/agents/` | Project (walks up to git root) |
+| 4 | `~/.agents/minions/` | Global |
+| 5 | `.pi/agents/` | Project (walks up to git root) |
+| 6 | `.pi/minions/` | Project (walks up to git root) |
+| 7 | `.agents/agents/` | Project (walks up to git root) |
+| 8 (highest) | `.agents/minions/` | Project (walks up to git root) |
 
-Project-local agents override global agents on name collision. See [Agents](agents.md) for the file format and frontmatter reference.
+Project-local agents override global agents on name collision. Each discovery directory loads top-level `*.md` files and immediate child folders containing `MINION.md`. See [Agents](agents.md) for the file format and frontmatter reference.
 
 ## Design decisions
 

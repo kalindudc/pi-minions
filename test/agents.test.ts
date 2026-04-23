@@ -112,6 +112,84 @@ describe("loadAgentsFromDir", () => {
     const scout = agents.find((a) => a.name === "scout");
     expect(scout?.systemPrompt.trim()).toBe("You are a scout.");
   });
+
+  it("loads MINION.md from immediate child directories", () => {
+    const tmpBase = join(tmpdir(), `pm-test-${Date.now()}`);
+    const agentsDir = join(tmpBase, "agents");
+    const reviewerDir = join(agentsDir, "reviewer");
+    mkdirSync(reviewerDir, { recursive: true });
+
+    writeFileSync(
+      join(reviewerDir, "MINION.md"),
+      "---\ndescription: Reviewer agent\n---\nYou are a reviewer.",
+    );
+
+    const agents = loadAgentsFromDir(agentsDir, "user");
+    const reviewer = agents.find((a) => a.name === "reviewer");
+    expect(reviewer).toBeDefined();
+    expect(reviewer?.description).toBe("Reviewer agent");
+    expect(reviewer?.filePath).toBe(join(reviewerDir, "MINION.md"));
+
+    rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  it("uses frontmatter name from MINION.md when provided", () => {
+    const tmpBase = join(tmpdir(), `pm-test-${Date.now()}`);
+    const agentsDir = join(tmpBase, "agents");
+    const reviewerDir = join(agentsDir, "reviewer");
+    mkdirSync(reviewerDir, { recursive: true });
+
+    writeFileSync(
+      join(reviewerDir, "MINION.md"),
+      "---\nname: strict-reviewer\ndescription: Reviewer agent\n---\nYou are a reviewer.",
+    );
+
+    const agents = loadAgentsFromDir(agentsDir, "user");
+    expect(agents.find((a) => a.name === "reviewer")).toBeUndefined();
+    expect(agents.find((a) => a.name === "strict-reviewer")).toBeDefined();
+
+    rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  it("prefers top-level markdown files over MINION.md on name collision", () => {
+    const tmpBase = join(tmpdir(), `pm-test-${Date.now()}`);
+    const agentsDir = join(tmpBase, "agents");
+    const reviewerDir = join(agentsDir, "reviewer");
+    mkdirSync(reviewerDir, { recursive: true });
+
+    writeFileSync(
+      join(agentsDir, "reviewer.md"),
+      "---\ndescription: Top-level reviewer\n---\nTop-level prompt.",
+    );
+    writeFileSync(
+      join(reviewerDir, "MINION.md"),
+      "---\ndescription: Nested reviewer\n---\nNested prompt.",
+    );
+
+    const agents = loadAgentsFromDir(agentsDir, "user");
+    const reviewer = agents.find((a) => a.name === "reviewer");
+    expect(reviewer?.description).toBe("Top-level reviewer");
+    expect(reviewer?.filePath).toBe(join(agentsDir, "reviewer.md"));
+
+    rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  it("does not discover MINION.md deeper than one directory level", () => {
+    const tmpBase = join(tmpdir(), `pm-test-${Date.now()}`);
+    const agentsDir = join(tmpBase, "agents");
+    const nestedDir = join(agentsDir, "team", "reviewer");
+    mkdirSync(nestedDir, { recursive: true });
+
+    writeFileSync(
+      join(nestedDir, "MINION.md"),
+      "---\ndescription: Deep reviewer\n---\nDeep prompt.",
+    );
+
+    const agents = loadAgentsFromDir(agentsDir, "user");
+    expect(agents).toEqual([]);
+
+    rmSync(tmpBase, { recursive: true, force: true });
+  });
 });
 
 describe("discoverAgents scope", () => {
@@ -142,6 +220,27 @@ describe("discoverAgents scope", () => {
     // The project version should win since it exists in .pi/agents under cwd
     expect(scout?.description).toBe("Project scout override");
     expect(scout?.source).toBe("project");
+
+    rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  it("discovers agents from .pi/minions/ project directory via MINION.md", () => {
+    const tmpBase = join(tmpdir(), `pm-test-${Date.now()}`);
+    const minionDir = join(tmpBase, ".pi", "minions", "reviewer");
+    mkdirSync(minionDir, { recursive: true });
+
+    writeFileSync(
+      join(minionDir, "MINION.md"),
+      "---\ndescription: Project reviewer\n---\nProject reviewer prompt.",
+    );
+
+    mkdirSync(join(tmpBase, ".git"), { recursive: true });
+
+    const { agents } = discoverAgents(tmpBase, "project");
+    const reviewer = agents.find((a) => a.name === "reviewer");
+    expect(reviewer).toBeDefined();
+    expect(reviewer?.description).toBe("Project reviewer");
+    expect(reviewer?.source).toBe("project");
 
     rmSync(tmpBase, { recursive: true, force: true });
   });
