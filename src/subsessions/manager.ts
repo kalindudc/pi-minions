@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import {
   createAgentSession,
-  createCodingTools,
   DefaultResourceLoader,
   getAgentDir,
   SessionManager,
@@ -106,7 +105,6 @@ export class SubsessionManager {
     const { session } = await createAgentSession({
       cwd: this.cwd,
       model: parentModel,
-      tools: createCodingTools(this.cwd),
       customTools: options.customTools,
       sessionManager,
       settingsManager,
