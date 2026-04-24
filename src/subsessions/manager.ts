@@ -5,6 +5,7 @@ import {
   createAgentSession,
   createCodingTools,
   DefaultResourceLoader,
+  getAgentDir,
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
@@ -79,8 +80,12 @@ export class SubsessionManager {
     this.writeMetadataFile(actualPath, metadata);
 
     // Set up resource loader with extensions filtered to prevent recursion
+    const agentDir = getAgentDir();
+    const settingsManager = SettingsManager.create(this.cwd, agentDir);
     const loader = new DefaultResourceLoader({
       cwd: this.cwd,
+      agentDir,
+      settingsManager,
       noExtensions: false,
       noSkills: false,
       noPromptTemplates: false,
@@ -104,7 +109,7 @@ export class SubsessionManager {
       tools: createCodingTools(this.cwd),
       customTools: options.customTools,
       sessionManager,
-      settingsManager: SettingsManager.create(),
+      settingsManager,
       modelRegistry,
       resourceLoader: loader,
     });

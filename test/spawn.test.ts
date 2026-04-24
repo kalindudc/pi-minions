@@ -22,6 +22,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
     create: () => ({ getSessionFile: () => "/tmp/test-session.jsonl" }),
   },
   SettingsManager: { create: () => ({}) },
+  getAgentDir: () => "/tmp/pi-agent",
   createCodingTools: () => [],
 }));
 
