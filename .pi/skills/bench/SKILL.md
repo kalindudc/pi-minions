@@ -21,12 +21,12 @@ Do NOT use for unit tests or functional bugs.
 
 1. Run benchmarks:
    ```bash
-   task test:bench
+   npm run test:bench
    ```
 
 2. Generate report:
    ```bash
-   task profile
+   npm run profile
    ```
 
 3. Write analysis to tmp/profiles/analysis.md.

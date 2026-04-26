@@ -22,12 +22,12 @@ pi-minions is a pi-coding-agent extension (`src/index.ts`) that adds recursive s
 
 | Command | Purpose |
 |---------|---------|
-| `task up` | Install deps, verify toolchain |
-| `task dev` | Load extension into pi (debug mode) |
-| `task test` | Run unit tests (vitest) |
-| `task test json=true` | Run unit tests with JSON output (for parsing) |
-| `task typecheck` | TypeScript type check |
-| `task test:e2e` | Run agentic e2e tests |
+| `npm install` | Install deps, verify toolchain (runs `prepare`) |
+| `npm run dev` | Load extension into pi (debug mode) |
+| `npm test` | Run unit tests (vitest) |
+| `npm run test:json` | Run unit tests with JSON output (for parsing) |
+| `npm run typecheck` | TypeScript type check |
+| `npm run test:e2e` | Run agentic e2e tests |
 
 Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, etc.
 
@@ -45,7 +45,7 @@ Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, etc.
 
 Always load `/skill:test-writer` before writing or auditing tests and follow it's guidance.
 
-If any test run parsing tools area available, ALWAYS pass it raw JSON output with `task test json=true` and then use the tool to parse the output
+If any test run parsing tools area available, ALWAYS pass it raw JSON output with `npm run test:json` and then use the tool to parse the output
 
 ## Documentation
 

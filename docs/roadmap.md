@@ -15,7 +15,7 @@
 - [x] optimize logger: replace appendFileSync with async batching at src/logger.ts:14
 - [x] fix memory leak: prune delivered results from ResultQueue at src/queue.ts:4
 - [x] reduce spinner overhead: increase interval from 80ms to 200ms at src/tools/spawn.ts:196
-- [x] add `task style` command with Biome linter/formatter (enforces clean codebase with zero warnings)
+- [x] add `npm run style` command with Biome linter/formatter (enforces clean codebase with zero warnings)
 - [x] delegation reminder is very in consistent and there is no feedback when it is received
 - [x] add `/minions version` command to quickly see the running extension version
 - [x] bug: do not send a user message for background minion result, the LLM thinks it is from the user and evaluates as a user message which can lead to confusion
@@ -73,7 +73,7 @@
 - [ ] interactive debugging mode for stuck minions
 
 ### development
-- [ ] deprecate Taskfile in favour of npm scripts ("prepare" can replace `task up`)
+- [x] migrate Taskfile to npm scripts (`prepare` replaces the previous setup command)
 
 ### nice to have (v1.x.x)
 - [ ] minion output filtering/search capabilities

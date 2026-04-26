@@ -76,7 +76,7 @@
 
 ## [0.8.1] - 2026-04-04
 
-- chore: add Biome linter with zero-warning enforcement and `task style` command
+- chore: add Biome linter with zero-warning enforcement and `npm run style` command
 - fix: minion abort error - add completed guard to prevent post-execution onUpdate calls
 - fix: usage updates when minions are in-progress
 - fix: usage format in spawn-renderer
@@ -85,7 +85,7 @@
 ## [0.8.0] - 2026-04-03
 
 - feat: add delegation conscience that monitors tool calls and injects delegation hints
-- feat: dev UX improvements — ASCII spinner, interactive fzf model selection, task cleanup
+- feat: dev UX improvements — ASCII spinner, interactive fzf model selection, cleanup script
 - feat: test infrastructure — unit tests for delegation conscience, expanded e2e coverage
 
 ## [0.7.0] - 2026-04-03
@@ -119,7 +119,7 @@
 
 - feat: custom footer showing combined minion + parent session token usage for complete session cost visibility
 - fix: minion completion status rendering when parallel foreground minions are active
-- fix: `task dev` plugin loading when stable version is already installed
+- fix: `npm run dev` plugin loading when stable version is already installed
 - fix: release script now generates `package-lock.json` before committing
 - chore: CHANGELOG.md formatting
 

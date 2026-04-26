@@ -3,19 +3,8 @@
 
 set -euo pipefail
 
-# Resolve task runner (go-task or task)
-if command -v task &>/dev/null; then
-  TASK=task
-elif command -v go-task &>/dev/null; then
-  TASK=go-task
-else
-  echo "Error: 'task' (go-task) is not installed or not in PATH."
-  echo "Install it from https://taskfile.dev or skip with: git commit --no-verify"
-  exit 1
-fi
-
 echo "==> pre-commit: running style checks..."
-if ! $TASK style; then
+if ! npm run style; then
   echo ""
   echo "✗ Style check failed. Fix the issues above before committing."
   echo "  To skip this hook: git commit --no-verify"
@@ -24,7 +13,7 @@ fi
 
 echo ""
 echo "==> pre-commit: running tests..."
-if ! $TASK test; then
+if ! npm test; then
   echo ""
   echo "✗ Tests failed. Fix the failures above before committing."
   echo "  To skip this hook: git commit --no-verify"

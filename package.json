@@ -45,15 +45,24 @@
     "vitest": "^3.0.0"
   },
   "scripts": {
+    "prepare": "bash scripts/setup.sh",
+    "dev": "bash scripts/dev.sh",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "task test:e2e",
-    "test:bench": "vitest bench",
+    "test:json": "vitest run --reporter=json | awk '/^\\{/{found=1} found'",
+    "test:e2e": "bash scripts/e2e.sh",
+    "test:bench": "bash scripts/test-bench.sh",
     "typecheck": "tsc --noEmit",
-    "style": "task style",
+    "style": "bash scripts/style.sh",
     "style:check": "biome check ./src ./test",
     "style:fix": "biome check --write --unsafe --no-errors-on-unmatched ./src ./test",
     "format": "biome format --write --no-errors-on-unmatched ./src ./test",
+    "cleanup": "bash scripts/cleanup.sh",
+    "logs": "bash scripts/logs.sh",
+    "profile": "bash scripts/profile.sh",
     "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "config": {
+    "loglevel": "silent"
   }
 }

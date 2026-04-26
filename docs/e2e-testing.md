@@ -5,8 +5,8 @@
 ## Quick start
 
 ```bash
-task test:e2e                # run all e2e tests
-task test:e2e -- halt        # run filtered (substring match on filename)
+npm run test:e2e             # run all e2e tests
+npm run test:e2e -- halt     # run filtered (substring match on filename)
 ```
 
 Results: `/tmp/logs/pi-minions/e2e-results.json`
@@ -15,15 +15,15 @@ Results: `/tmp/logs/pi-minions/e2e-results.json`
 
 Agentic test suite — a real LLM inside pi executes test markdown files mechanically. Tests the full stack: extension loading → tool registration → session creation → LLM interaction → transcript logging → safety controls.
 
-- Run all: `task test:e2e`
-- Run filtered: `task test:e2e -- <filter>` (substring match on filename)
+- Run all: `npm run test:e2e`
+- Run filtered: `npm run test:e2e -- <filter>` (substring match on filename)
 - Results: `/tmp/logs/pi-minions/e2e-results.json`
 - Debug log: `/tmp/logs/pi-minions/debug.log`
 - Transcripts: `/tmp/logs/pi-minions/minions/<id>-<name>.log`
 
 ## How It Works
 
-`task test:e2e` → `scripts/e2e.sh` → `pi -e ./src/index.ts --no-session -p "..."` (background)
+`npm run test:e2e` → `scripts/e2e.sh` → `pi -e ./src/index.ts --no-session -p "..."` (background)
 
 1. pi loads the `e2e-runner` skill (`.pi/skills/e2e-runner/SKILL.md`)
 2. The skill discovers and executes all `test/e2e/*.md` files in sorted order

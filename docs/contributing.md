@@ -8,29 +8,28 @@
 
 - **Node.js** (ES2022+ target)
 - **pi** — `npm install -g @mariozechner/pi-coding-agent`
-- **go-task** — [taskfile.dev](https://taskfile.dev/) (task runner)
 
 ### Getting started
 
 ```bash
 git clone https://github.com/kalindudc/pi-minions.git
 cd pi-minions
-task up        # install deps + verify toolchain
+npm install   # install deps + verify toolchain (runs prepare automatically)
 ```
 
-### Task commands
+### npm scripts
 
 | Command | Purpose |
 |---------|---------|
-| `task up` | Install dependencies, verify toolchain |
-| `task dev` | Load extension into pi (with debug logging) |
-| `task test` | Run unit tests (vitest) |
-| `task typecheck` | TypeScript type check (`tsc --noEmit`) |
-| `task test:e2e` | Run e2e tests against real pi + LLM |
-| `task test:e2e -- <filter>` | Run filtered e2e tests (substring match) |
+| `npm install` | Install dependencies, verify toolchain (runs `prepare`) |
+| `npm run dev` | Load extension into pi (with debug logging) |
+| `npm test` | Run unit tests (vitest) |
+| `npm run typecheck` | TypeScript type check (`tsc --noEmit`) |
+| `npm run test:e2e` | Run e2e tests against real pi + LLM |
+| `npm run test:e2e -- <filter>` | Run filtered e2e tests (substring match) |
 
 > [!TIP]
-> Run `task dev` in one terminal and `task logs` in another to see debug output in real time.
+> Run `npm run dev` in one terminal and `npm run logs` in another to see debug output in real time.
 
 ## Project structure
 
@@ -69,7 +68,7 @@ See [Architecture](architecture.md) for the module dependency map and data flow 
 ### Unit tests
 
 ```bash
-task test                    # run all
+npm test                     # run all
 npx vitest run test/tree     # run specific file
 npx vitest --watch           # watch mode
 ```
@@ -79,8 +78,8 @@ Tests use [vitest](https://vitest.dev/) with the `mock-session` helper for sessi
 ### E2E tests
 
 ```bash
-task test:e2e                # run all
-task test:e2e -- halt        # run filtered (substring match)
+npm run test:e2e             # run all
+npm run test:e2e -- halt     # run filtered (substring match)
 ```
 
 E2E tests are agentic — a real LLM inside pi executes test markdown files. They test the full stack from extension loading through to transcript logging and safety controls.
