@@ -54,6 +54,16 @@ Output:
 
 **Combine related changes:** Multiple related commits → single CHANGELOG entry
 
+**Credit contributors:**
+For each commit, get the author info:
+```bash
+git log <LAST>..HEAD --format="%h|%an|%ae|%s"
+```
+- If the author email/username is NOT the project maintainer, credit them
+- Append ` — @<github_username>` to the CHANGELOG entry
+- Use the GitHub username from the commit email or PR reference in the commit subject
+- Internal/maintainer commits need no attribution
+
 ## Generate CHANGELOG
 
 Format:

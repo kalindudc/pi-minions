@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-04-26
+
+- feat: add `allowEphemeral` config to disable ephemeral minions — @Jomik
+- feat: support `MINION.md` subfolder agents — @tunnckoCore
+- fix: pass explicit pi paths to subsessions and use default tool selection for Pi 0.68+ — @tunnckoCore
+- fix: wire up `AgentConfig.tools` to filter minion tool access — @Jomik
+- chore: migrate from Taskfile to npm scripts
+
 ## [0.16.2] - 2026-04-17
 
 - fix: eliminate duplicate turns in observability widget
