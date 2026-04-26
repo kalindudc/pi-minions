@@ -28,6 +28,7 @@ function reverseChangelog(content: string): string {
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { discoverAgents } from "../agents.js";
+import { getConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { ResultQueue } from "../queue.js";
 import type { EventBus } from "../subsessions/event-bus.js";
@@ -163,8 +164,11 @@ async function showMinionWithCycling(
 
 export function showListMinions(ctx: ExtensionCommandContext) {
   const { agents } = discoverAgents(ctx.cwd, "both");
+  const config = getConfig(ctx);
   const lines = ["Available minion types:"];
-  lines.push("  minion (built-in): General-purpose ephemeral minion with default capabilities");
+  if (config.allowEphemeral) {
+    lines.push("  minion (built-in): General-purpose ephemeral minion with default capabilities");
+  }
 
   for (const a of agents) {
     const model = a.model ? ` [model: ${a.model}]` : "";

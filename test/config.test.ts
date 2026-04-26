@@ -51,6 +51,7 @@ describe("getConfig", () => {
       const config = getConfig(ctx);
 
       expect(config.minionNames).toEqual(DEFAULT_MINION_NAMES);
+      expect(config.allowEphemeral).toBe(true);
       expect(config.delegation.enabled).toBe(true);
       expect(config.delegation.toolCallThreshold).toBe(16);
       expect(config.delegation.hintIntervalMinutes).toBe(8);
@@ -87,6 +88,20 @@ describe("getConfig", () => {
       const config = getConfig(ctx);
 
       expect(config.minionNames).toEqual(["alpha", "beta", "gamma"]);
+    });
+
+    it("reads allowEphemeral from global settings", () => {
+      const globalSettings = {
+        "pi-minions": {
+          allowEphemeral: false,
+        },
+      };
+      writeFileSync(join(agentDir, "settings.json"), JSON.stringify(globalSettings));
+
+      const ctx = createMockContext(tempDir);
+      const config = getConfig(ctx);
+
+      expect(config.allowEphemeral).toBe(false);
     });
 
     it("reads delegation settings from global settings", () => {
@@ -379,6 +394,7 @@ describe("Config types", () => {
   it("ResolvedConfig has all required fields", () => {
     const mockResolved: ResolvedConfig = {
       minionNames: ["test"],
+      allowEphemeral: true,
       delegation: {
         enabled: true,
         toolCallThreshold: 5,
