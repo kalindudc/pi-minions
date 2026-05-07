@@ -26,9 +26,6 @@
   },
   "files": [
     "src/",
-    "docs/",
-    "README.md",
-    "CHANGELOG.md",
     "LICENSE.md"
   ],
   "peerDependencies": {
