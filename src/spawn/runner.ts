@@ -1,18 +1,14 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { discoverAgents } from "../agents.js";
 import { logger } from "../logger.js";
 import { defaultMinionTemplate } from "../minions.js";
-import type { ResultQueue } from "../queue.js";
 import { formatToolCall } from "../render.js";
 import { runMinionSession } from "../spawn.js";
 import type { SubsessionManager } from "../subsessions/manager.js";
 import type { BatchMinionItem } from "../tools/spawn.js";
 import type { AgentTree } from "../tree.js";
-import type { AgentConfig, UsageStats } from "../types.js";
-import { emptyUsage } from "../types.js";
+import type { AgentConfig } from "../types.js";
 import type { BatchCoordinator } from "./batch.js";
-import { handleCompletion } from "./completion.js";
-import { onDetach } from "./detach.js";
 
 function resolveAgentConfig(agentName: string, cwd: string): AgentConfig {
   const { agents } = discoverAgents(cwd, "both");
@@ -36,15 +32,10 @@ export async function runSingleMinion(opts: {
   isSingleMinion: boolean;
   toolCallId: string;
   controller: AbortController;
-  detachedMinions: Set<string>;
-  detachResolvers: Map<string, () => void>;
   tree: AgentTree;
-  queue: ResultQueue;
-  pi: ExtensionAPI;
   ctx: ExtensionContext;
   piConfig: {
     toolSync: { enabled: boolean; maxWait: number };
-    interaction: { timeout: number };
   };
   parentToolNames: string[];
   subsessionManager: SubsessionManager;
@@ -53,7 +44,6 @@ export async function runSingleMinion(opts: {
   success: boolean;
   result?: import("../types.js").SpawnResult;
   error?: string;
-  detached?: boolean;
 }> {
   const {
     spec,
@@ -61,11 +51,7 @@ export async function runSingleMinion(opts: {
     isSingleMinion,
     toolCallId,
     controller,
-    detachedMinions,
-    detachResolvers,
     tree,
-    queue,
-    pi,
     ctx,
     piConfig,
     parentToolNames,
@@ -80,7 +66,7 @@ export async function runSingleMinion(opts: {
   coordinator.emit(true);
 
   try {
-    const sessionPromise = runMinionSession(config, spec.task, {
+    const result = await runMinionSession(config, spec.task, {
       id: m.id,
       name: m.name,
       signal: controller.signal,
@@ -93,7 +79,6 @@ export async function runSingleMinion(opts: {
       parentToolNames,
       toolSyncEnabled: piConfig.toolSync.enabled,
       toolSyncMaxWait: piConfig.toolSync.maxWait * 1000,
-      interactionTimeout: piConfig.interaction.timeout * 1000,
       tree,
       onToolActivity: (activity) => {
         if (activity.type === "start") {
@@ -124,84 +109,23 @@ export async function runSingleMinion(opts: {
       onUsageUpdate: (usage) => {
         tree.updateUsage(m.id, usage);
         m.usage = {
+          ...m.usage,
           input: usage.input,
           output: usage.output,
           cacheRead: usage.cacheRead,
           cacheWrite: usage.cacheWrite,
           cost: usage.cost,
-          contextTokens: 0,
-          turns: 0,
         };
         coordinator.emit(true);
       },
     });
-
-    let detachResolve: (() => void) | undefined;
-
-    const detachPromise = new Promise<{
-      exitCode: number;
-      finalOutput: string;
-      usage: UsageStats;
-      detached: boolean;
-    }>((resolve) => {
-      detachResolve = () => {
-        detachedMinions.add(m.id);
-        resolve({
-          exitCode: 0,
-          finalOutput: "detached",
-          usage: { ...emptyUsage() },
-          detached: true,
-        });
-      };
-      detachResolvers.set(m.id, detachResolve);
-    });
-
-    const unsubscribeThisDetach = onDetach(m.id, () => {
-      logger.debug("spawn:tool", "minion-detached", {
-        id: m.id,
-        name: m.name,
-        batch: !isSingleMinion,
-      });
-      detachResolve?.();
-    });
-
-    const result = await Promise.race([sessionPromise, detachPromise]);
-
-    unsubscribeThisDetach();
-
-    if ("detached" in result || detachedMinions.has(m.id)) {
-      logger.debug("spawn:tool", "detached", {
-        id: m.id,
-        name: m.name,
-        batch: !isSingleMinion,
-      });
-      tree.markDetached(m.id);
-      m.detached = true;
-      const startTime = tree.get(m.id)?.startTime ?? Date.now();
-      handleCompletion(sessionPromise, m.id, m.name, spec.task, startTime, tree, queue, pi);
-      m.status = "running";
-      m.finalOutput = "Moved to background by user";
-      coordinator.emit(true);
-      return {
-        success: true,
-        result: {
-          exitCode: 0,
-          finalOutput: `Moved to background by user`,
-          usage: tree.get(m.id)?.usage ?? emptyUsage(),
-        },
-        detached: true,
-      };
-    }
 
     const currentStatus = tree.get(m.id)?.status;
     if (currentStatus !== "aborted") {
       m.status = result.exitCode === 0 ? "completed" : "failed";
       m.finalOutput = result.finalOutput;
       m.usage = result.usage;
-      const errorMsg =
-        typeof result === "object" && result && "error" in result
-          ? String(result.error)
-          : undefined;
+      const errorMsg = result.error;
       tree.updateStatus(m.id, m.status, result.exitCode, errorMsg);
       tree.updateUsage(m.id, result.usage);
       coordinator.emit(true);
@@ -212,7 +136,7 @@ export async function runSingleMinion(opts: {
     }
 
     if (!isSingleMinion) {
-      logger.debug("spawn:tool", "batch-minion-complete", {
+      logger.debug("spawn:tool", "batch-minion-finished", {
         id: m.id,
         name: m.name,
         status: m.status,

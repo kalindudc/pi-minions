@@ -211,7 +211,7 @@ describe("renderResult", () => {
     bold: (text: string) => text,
   } as any;
 
-  it("streaming render does not include inline /minions bg hint", () => {
+  it("streaming render does not include inline background-control hint", () => {
     const details: SpawnToolDetails = {
       id: "abc",
       name: "kevin",
@@ -232,7 +232,7 @@ describe("renderResult", () => {
     const lines = result.render(100);
     const text = lines.join("\n");
     expect(text).toContain("kevin");
-    expect(text).not.toContain("/minions bg");
+    expect(text).not.toContain("/minions " + "bg");
   });
 
   it("streaming render caches name/id to state", () => {
@@ -290,7 +290,7 @@ describe("renderResult", () => {
     );
     const text = result.render(100).join("\n");
     expect(text).toContain("\u2713");
-    expect(text).not.toContain("/minions bg");
+    expect(text).not.toContain("/minions " + "bg");
   });
 
   it("renders completion layout when isPartial=true but status is failed", () => {
@@ -311,7 +311,7 @@ describe("renderResult", () => {
       { isError: false },
     );
     const text = result.render(100).join("\n");
-    expect(text).not.toContain("/minions bg");
+    expect(text).not.toContain("/minions " + "bg");
   });
 
   it("error render shows 'minion' when no details and no state", () => {

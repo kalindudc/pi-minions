@@ -1,135 +1,67 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Model } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 import { createHaltHandler } from "./commands/halt.js";
 import { createMinionsHandler } from "./commands/minions.js";
 import { createSpawnHandler } from "./commands/spawn.js";
-import { getConfig } from "./config.js";
 import { buildFooterFactory } from "./footer.js";
 import { LOG_FILE, logger } from "./logger.js";
-import { ResultQueue } from "./queue.js";
 import { renderCall, renderResult } from "./render.js";
-import { minionChangelogRenderer } from "./renderers/minion-changelog.js";
-import { minionCompleteRenderer } from "./renderers/minion-complete.js";
 import { minionSpawnMessageRenderer } from "./renderers/minion-spawn.js";
+import { getMinionsSkill } from "./skill.js";
 import { createStatusTracker } from "./status.js";
 import { EventBus } from "./subsessions/event-bus.js";
-import { createInteractionHandler } from "./subsessions/interaction.js";
 import { SubsessionManager } from "./subsessions/manager.js";
 import { getTempSessionPath } from "./subsessions/paths.js";
 import { HaltToolParams, halt } from "./tools/halt.js";
 import { ListAgentsParams, listAgents } from "./tools/list-agents.js";
-import {
-  ListMinionsParams,
-  listMinions,
-  ShowMinionParams,
-  SteerMinionParams,
-  showMinion,
-  steerMinion,
-} from "./tools/minions.js";
-import { SpawnBgToolParams, SpawnToolParams, spawn, spawnBg } from "./tools/spawn.js";
+import { ListMinionsParams, listMinions, ShowMinionParams, showMinion } from "./tools/minions.js";
+import { SpawnToolParams, spawn } from "./tools/spawn.js";
 import { AgentTree } from "./tree.js";
 
-function createDelegationHint(toolCallCount: number): string {
-  return (
-    "\n\nDELEGATION REMINDER: You have made: " +
-    toolCallCount +
-    " tool calls. The pi-minions extension is active and provides tools for parallel execution and work delegation." +
-    "\nDELEGATE independent subtasks to minions for faster, isolated processing using the `spawn` and `spawn_bg` tools." +
-    "\nUSE any delegation skills you have available through the system.\n" +
-    "\nALWAYS acknowledge this reminder when you receive it and review your delegation strategy before making further tool calls.\n"
-  );
-}
-
-function buildPromptFromContext(messages: AgentMessage[]): string {
-  return messages
-    .filter((msg) => msg.role === "user")
-    .map((msg) => (typeof msg.content === "string" ? msg.content : ""))
-    .join("\n");
-}
+const LearnMinionsParams = Type.Object(
+  {},
+  { description: "Return the built-in pi-minions foreground delegation skill." },
+);
 
 export default function (pi: ExtensionAPI): void {
   logger.debug("extension", "loaded", { logFile: LOG_FILE });
 
-  // Core state
   let tree = new AgentTree();
-  const queue = new ResultQueue();
-  // SubsessionManager is initialized in session_start event
   let subsessionManager: SubsessionManager | undefined;
-
-  // Minion status tracking (background and foreground)
-  // Status tracker is initialized after subsessionManager in session_start
   let statusTracker: ReturnType<typeof createStatusTracker> | undefined;
   let cachedUi: ExtensionContext["ui"] | null = null;
   let cachedCtx: ExtensionContext | null = null;
   // biome-ignore lint/suspicious/noExplicitAny: external API type
   let cachedModel: Model<any> | undefined;
 
-  // EventBus for minion progress streaming
   const eventBus = new EventBus();
-
-  // Forward minion interaction requests to the parent session's UI
-  const _unsubInteraction = createInteractionHandler(eventBus, () => cachedUi);
-
-  // Delegation conscience: Track tool calls and inject delegation reminder
-  // Config is loaded per-session in the context handler
-
-  let toolCallCount = 0;
-  let _lastPromptText = "";
-  let lastHintTime = 0;
-
-  let usedMinionsThisSession = false;
 
   pi.registerTool({
     name: "spawn",
     label: "Spawn Minion",
     description:
-      "Delegate a task to a named agent or an ephemeral minion with isolated context. " +
+      "Delegate a task to a named agent or an ephemeral minion with isolated foreground context. " +
       "If no agent name is provided, spawns an ephemeral minion with default capabilities. " +
       "Agents are discovered from global and project agent/minion directories, including ~/.pi/agent/{agents,minions}/, ~/.agents/{agents,minions}/, .pi/{agents,minions}/, and .agents/{agents,minions}/. " +
-      "The agent runs as a file-based session with parent tracking.",
-    promptSnippet: "Spawn a minion for isolated task delegation",
+      "The agent runs as a file-based foreground session with parent tracking.",
+    promptSnippet: "Spawn a foreground minion for isolated task delegation",
     promptGuidelines: [
-      'Use spawn for "foreground" task delegation. The tool blocks until the minion completes and returns its result.',
+      "Use spawn for foreground task delegation. The tool blocks until the minion completes and returns its result.",
       "To spawn multiple minions in parallel, use the `tasks` array parameter with multiple task descriptors. Each task can specify `task`, optional `agent`, and optional `model`.",
-      "For single task delegation, use the `task` parameter directly/",
-      "For fire-and-forget delegation where you do not need the result immediately, use spawn_bg instead.",
+      "For single task delegation, use the `task` parameter directly.",
       "Use list_agents to discover available named agents before spawning by name.",
       "Omit the agent parameter to spawn an ephemeral minion with default capabilities.",
-      "When a spawn result contains [USER ACTION] and mentions background, the user used /minions bg to move the minion. This is intentional, not an error. Acknowledge briefly and continue.",
       "When a spawn result says [HALTED], the user intentionally stopped the minion. Do NOT retry, re-spawn, or ask about it. Acknowledge and move on.",
-      "To bring background minions to foreground, use the `ids` parameter with an array of minion IDs or names. The tool will block and stream progress like a foreground spawn.",
+      "Use list_minions and show_minion to inspect foreground minion activity.",
     ],
     parameters: SpawnToolParams,
     execute: (...args) => {
       if (!subsessionManager) throw new Error("SubsessionManager not initialized");
-      usedMinionsThisSession = true;
-      return spawn(tree, queue, pi, subsessionManager)(...args);
+      return spawn(tree, pi, subsessionManager)(...args);
     },
     renderCall,
     renderResult,
-  });
-
-  pi.registerTool({
-    name: "spawn_bg",
-    label: "Spawn Minion (Background)",
-    description:
-      "Spawn a minion in the background. The tool returns immediately while the minion runs independently. " +
-      "Results are automatically delivered when the minion completes. " +
-      "Use this only when the user explicitly requests background execution.",
-    promptSnippet: "Spawn a background minion for fire-and-forget delegation",
-    promptGuidelines: [
-      "Use spawn_bg for fire-and-forget tasks where you do not need the result before continuing.",
-      'Only use spawn_bg when the user explicitly asks for "background" execution.',
-      "For results you need before proceeding, use spawn (foreground) instead.",
-      "Background minion results are delivered via a system message on the next turn - they are NOT from the user.",
-    ],
-    parameters: SpawnBgToolParams,
-    execute: (...args) => {
-      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
-      usedMinionsThisSession = true;
-      return spawnBg(tree, queue, pi, subsessionManager)(...args);
-    },
   });
 
   pi.registerTool({
@@ -164,15 +96,13 @@ export default function (pi: ExtensionAPI): void {
   pi.registerTool({
     name: "list_minions",
     label: "List Minions",
-    description:
-      "List all running and completed (pending delivery) minions in the current session.",
-    promptSnippet: "List all running and recently completed minions",
+    description: "List all foreground minions in the current session.",
+    promptSnippet: "List all current foreground minions",
     promptGuidelines: [
-      "Use list_minions to check what minions are currently running before spawning new ones.",
-      "Completed minions appear under 'pending' until their result is consumed by the next turn.",
+      "Use list_minions to check what foreground minions are currently running or recently completed before spawning new ones.",
     ],
     parameters: ListMinionsParams,
-    execute: (...args) => listMinions(tree, queue)(...args),
+    execute: (...args) => listMinions(tree)(...args),
   });
 
   pi.registerTool({
@@ -180,40 +110,33 @@ export default function (pi: ExtensionAPI): void {
     label: "Show Minion",
     description: "Show detailed status, activity, and output of a minion by ID or name.",
     parameters: ShowMinionParams,
-    execute: (...args) => showMinion(tree, queue)(...args),
+    execute: (...args) => showMinion(tree)(...args),
   });
-
-  // Register custom message renderers
-  logger.debug("extension", "registering-renderers");
-  pi.registerMessageRenderer("minion-spawn", minionSpawnMessageRenderer);
-  pi.registerMessageRenderer("minion-changelog", minionChangelogRenderer);
-  pi.registerMessageRenderer("minion-complete", minionCompleteRenderer);
-  logger.debug("extension", "renderers-registered");
 
   pi.registerTool({
-    name: "steer_minion",
-    label: "Steer Minion",
-    description:
-      "Send a steering message to a running minion. The message is injected into the minion's context before its next LLM call.",
-    promptSnippet: "Redirect a running minion with new instructions",
-    parameters: SteerMinionParams,
-    execute: (...args) => {
-      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
-      return steerMinion(tree, subsessionManager)(...args);
-    },
+    name: "learn_minions",
+    label: "Learn Minions",
+    description: "Return concise guidance for using pi-minions foreground delegation.",
+    promptSnippet: "Learn how to use pi-minions",
+    parameters: LearnMinionsParams,
+    execute: async () => ({
+      content: [{ type: "text", text: getMinionsSkill() }],
+      details: undefined,
+    }),
   });
 
+  logger.debug("extension", "registering-renderers");
+  pi.registerMessageRenderer("minion-spawn", minionSpawnMessageRenderer);
+  logger.debug("extension", "renderers-registered");
+
   pi.registerCommand("spawn", {
-    description: "Spawn a minion: /spawn <task> [--model <model>] [--bg]",
+    description: "Spawn a foreground minion: /spawn <task> [--model <model>]",
     handler: createSpawnHandler(pi),
   });
 
   pi.registerCommand("minions", {
     description: "Manage minions: /minions [help] for more information",
-    handler: (args, ctx) => {
-      if (!subsessionManager) throw new Error("SubsessionManager not initialized");
-      return createMinionsHandler(tree, queue, subsessionManager, eventBus, pi)(args, ctx);
-    },
+    handler: (args, ctx) => createMinionsHandler(tree, eventBus)(args, ctx),
   });
 
   pi.registerCommand("halt", {
@@ -229,70 +152,11 @@ export default function (pi: ExtensionAPI): void {
     statusTracker?.refresh();
   });
 
-  pi.on("turn_start", async () => {
-    // none
-  });
-
-  pi.on("tool_call", async () => {
-    toolCallCount++;
-  });
-
-  pi.on("context", async (event, ctx) => {
-    const config = getConfig(ctx);
-
-    // Skip delegation hints if disabled
-    if (!config.delegation.enabled) {
-      return { messages: event.messages };
-    }
-
-    const hintIntervalMs = config.delegation.hintIntervalMinutes * 60000;
-
-    const prompt = buildPromptFromContext(event.messages);
-    const isComplexTask =
-      toolCallCount >= config.delegation.toolCallThreshold ||
-      prompt.length > 200 ||
-      /\b(investigate|audit|review|refactor|analyze|implement)\b/i.test(prompt);
-
-    _lastPromptText = prompt;
-
-    // only send hint if we haven't used minions yet in this session, it's a complex task
-    // and we haven't sent a hint recently (avoid spamming hints on every turn for complex tasks)
-    const currentTime = Date.now();
-    const shouldSendHint =
-      !usedMinionsThisSession && isComplexTask && currentTime - lastHintTime > hintIntervalMs;
-    const newMessages = [...event.messages];
-
-    // Only inject hint for complex tasks and when prompt changes (avoid spam)
-    if (shouldSendHint) {
-      newMessages.push({
-        role: "user",
-        content: createDelegationHint(toolCallCount),
-        timestamp: currentTime,
-      });
-
-      logger.debug("delegation", "injecting_hint", {
-        toolCallCount,
-        promptLength: prompt.length,
-        isComplexTask: isComplexTask,
-        timeSinceLastHint: currentTime - lastHintTime,
-        usedMinionsThisSession: usedMinionsThisSession,
-        message: newMessages[newMessages.length - 1],
-      });
-
-      toolCallCount = 0;
-      lastHintTime = currentTime;
-    }
-
-    return { messages: newMessages };
-  });
-
   pi.on("session_start", (_event, ctx) => {
     cachedCtx = ctx;
     cachedModel = ctx.model;
     cachedUi = ctx.ui;
-    usedMinionsThisSession = false;
 
-    // Create subsession manager for file-based minion sessions (always use file-based)
     const parentSessionPath = ctx.sessionManager?.getSessionFile() ?? getTempSessionPath(ctx.cwd);
     subsessionManager = new SubsessionManager(ctx.cwd, parentSessionPath, eventBus);
 
@@ -315,12 +179,10 @@ export default function (pi: ExtensionAPI): void {
       isTemp: !ctx.sessionManager?.getSessionFile(),
     });
 
-    // Initialize status tracker now that we have subsessionManager
     statusTracker = createStatusTracker(tree, subsessionManager, ctx);
     tree.onChange(() => statusTracker?.refresh());
     statusTracker.setUi(cachedUi);
 
-    // Clean up legacy status keys from previous versions
     cachedUi.setStatus("minions-bg", undefined);
     cachedUi.setStatus("minions-fg", undefined);
 

@@ -1,6 +1,6 @@
 # Test: list-minions
 
-Verify that the `list_minion_types` tool shows running minions.
+Verify that the `list_minions` tool reports foreground minions retained in the current session tree.
 
 ## Setup
 
@@ -8,21 +8,17 @@ None.
 
 ## Action
 
-First, call the `spawn_bg` tool with:
-- `agent`: `e2e-slow`
-- `task`: `Read every file in the src/ directory one by one. For each file provide a detailed 1000 word analysis.`
+First, call the `spawn` tool with:
+- `task`: `Return the exact word list-check`
 
-Extract the minion name from the spawn_bg response.
-
-Wait 2 seconds, then call the `list_minion_types` tool.
-
-After checking, call the `halt` tool with:
-- `id`: `all`
+After the foreground spawn completes, call the `list_minions` tool.
 
 ## Expected
 
-- The `list_minion_types` result contains the word "Running"
-- The `list_minion_types` result contains the minion name from the spawn_bg response
+- The `spawn` result contains `list-check`
+- The `list_minions` result contains `Minions (`
+- The `list_minions` result contains the minion name or ID from the `spawn` response
+- The `list_minions` result contains `[completed]`
 
 ## Cleanup
 

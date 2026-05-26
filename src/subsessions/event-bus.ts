@@ -39,21 +39,3 @@ export class EventBus {
 export const MINION_EVENT_CHANNEL = "minion:event";
 export const MINION_PROGRESS_CHANNEL = "minion:progress";
 export const MINION_COMPLETE_CHANNEL = "minion:complete";
-export const MINION_INTERACTION_REQUEST = "minion:interaction:request";
-export const MINION_INTERACTION_RESPONSE = "minion:interaction:response";
-
-export interface InteractionRequest {
-  requestId: string;
-  minionId: string;
-  minionName: string;
-  type: "confirm" | "select" | "input" | "editor";
-  title: string;
-  message?: string;
-  options?: string[];
-}
-
-export interface InteractionResponse {
-  requestId: string;
-  value: unknown;
-  cancelled: boolean;
-}

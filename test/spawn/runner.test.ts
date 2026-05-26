@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ResultQueue } from "../../src/queue.js";
 import { BatchCoordinator } from "../../src/spawn/batch.js";
 import { runSingleMinion } from "../../src/spawn/runner.js";
 import { SubsessionManager } from "../../src/subsessions/manager.js";
@@ -38,14 +37,6 @@ function createCtx() {
   } as any;
 }
 
-function createPi() {
-  return {
-    sendUserMessage: vi.fn(),
-    sendMessage: vi.fn(),
-    getAllTools: vi.fn().mockReturnValue([{ name: "read", description: "Read" }]),
-  } as any;
-}
-
 function makeMinion(overrides: Partial<BatchMinionItem> = {}): BatchMinionItem {
   return {
     id: "m1",
@@ -57,6 +48,18 @@ function makeMinion(overrides: Partial<BatchMinionItem> = {}): BatchMinionItem {
     finalOutput: "",
     ...overrides,
   };
+}
+
+function makeCoordinator(m: BatchMinionItem, onUpdate = vi.fn()) {
+  return new BatchCoordinator({
+    minions: [m],
+    isSingleMinion: true,
+    batchId: "batch-1",
+    batchTask: "test",
+    outputPreviewLines: 3,
+    spinnerFrames: ["-"],
+    onUpdate,
+  });
 }
 
 beforeEach(() => {
@@ -76,133 +79,38 @@ afterEach(() => {
 });
 
 describe("runSingleMinion", () => {
-  it("returns success and the session result on normal completion", async () => {
+  it("marks the tree node and minion item completed after a successful foreground session", async () => {
     const tree = new AgentTree();
-    const queue = new ResultQueue();
-    const pi = createPi();
     const ctx = createCtx();
     const m = makeMinion();
     tree.add(m.id, m.name, m.task);
-
-    const coordinator = new BatchCoordinator({
-      minions: [m],
-      isSingleMinion: true,
-      batchId: "batch-1",
-      batchTask: "test",
-      outputPreviewLines: 3,
-      spinnerFrames: ["-"],
-    });
-
-    const controller = new AbortController();
-    const detachedMinions = new Set<string>();
-    const detachResolvers = new Map<string, () => void>();
-    const subsessionManager = new SubsessionManager("/tmp", "/tmp/parent.jsonl");
 
     const result = await runSingleMinion({
       spec: { task: m.task, agent: "scout" },
       m,
       isSingleMinion: true,
       toolCallId: "tc1",
-      controller,
-      detachedMinions,
-      detachResolvers,
+      controller: new AbortController(),
       tree,
-      queue,
-      pi,
       ctx,
-      piConfig: { toolSync: { enabled: false, maxWait: 30 }, interaction: { timeout: 60 } },
+      piConfig: { toolSync: { enabled: false, maxWait: 30 } },
       parentToolNames: [],
-      subsessionManager,
-      coordinator,
+      subsessionManager: new SubsessionManager("/tmp", "/tmp/parent.jsonl"),
+      coordinator: makeCoordinator(m),
     });
 
     expect(result.success).toBe(true);
-    expect(result.result?.exitCode).toBe(0);
     expect(result.result?.finalOutput).toBe("done");
+    expect(m.status).toBe("completed");
+    expect(tree.get(m.id)?.status).toBe("completed");
   });
 
-  it("handles detach signals by returning detached=true", async () => {
-    vi.useFakeTimers();
-    vi.mocked(runMinionSession).mockImplementation(
-      () =>
-        new Promise((resolve) =>
-          setTimeout(() => resolve({ exitCode: 0, finalOutput: "done", usage: emptyUsage() }), 500),
-        ),
-    );
-
+  it("forwards usage updates to the tree and coordinator minion", async () => {
     const tree = new AgentTree();
-    const queue = new ResultQueue();
-    const pi = createPi();
     const ctx = createCtx();
     const m = makeMinion();
     tree.add(m.id, m.name, m.task);
-
-    const coordinator = new BatchCoordinator({
-      minions: [m],
-      isSingleMinion: true,
-      batchId: "batch-1",
-      batchTask: "test",
-      outputPreviewLines: 3,
-      spinnerFrames: ["-"],
-    });
-
-    const controller = new AbortController();
-    const detachedMinions = new Set<string>();
-    const detachResolvers = new Map<string, () => void>();
-    const subsessionManager = new SubsessionManager("/tmp", "/tmp/parent.jsonl");
-
-    const runPromise = runSingleMinion({
-      spec: { task: m.task },
-      m,
-      isSingleMinion: true,
-      toolCallId: "tc1",
-      controller,
-      detachedMinions,
-      detachResolvers,
-      tree,
-      queue,
-      pi,
-      ctx,
-      piConfig: { toolSync: { enabled: false, maxWait: 30 }, interaction: { timeout: 60 } },
-      parentToolNames: [],
-      subsessionManager,
-      coordinator,
-    });
-
-    // Allow the detach resolver to be registered
-    await vi.advanceTimersByTimeAsync(0);
-
-    // Trigger detach via the registered resolver
-    const resolver = detachResolvers.get(m.id);
-    expect(resolver).toBeDefined();
-    resolver!();
-
-    const result = await runPromise;
-    expect(result.detached).toBe(true);
-    expect(result.success).toBe(true);
-    expect(tree.get(m.id)?.detached).toBe(true);
-
-    vi.useRealTimers();
-  });
-
-  it("forwards usage updates to the tree and the coordinator minion", async () => {
-    const tree = new AgentTree();
-    const queue = new ResultQueue();
-    const pi = createPi();
-    const ctx = createCtx();
-    const m = makeMinion();
-    tree.add(m.id, m.name, m.task);
-
     const onUpdate = vi.fn();
-    const coordinator = new BatchCoordinator({
-      minions: [m],
-      isSingleMinion: true,
-      batchId: "batch-1",
-      batchTask: "test",
-      outputPreviewLines: 3,
-      spinnerFrames: ["-"],
-      onUpdate,
-    });
 
     vi.mocked(runMinionSession).mockImplementation(async (_config, _task, opts) => {
       opts.onUsageUpdate?.({
@@ -227,35 +135,54 @@ describe("runSingleMinion", () => {
       };
     });
 
-    const controller = new AbortController();
-    const detachedMinions = new Set<string>();
-    const detachResolvers = new Map<string, () => void>();
-    const subsessionManager = new SubsessionManager("/tmp", "/tmp/parent.jsonl");
-
     await runSingleMinion({
       spec: { task: m.task },
       m,
       isSingleMinion: true,
       toolCallId: "tc1",
-      controller,
-      detachedMinions,
-      detachResolvers,
+      controller: new AbortController(),
       tree,
-      queue,
-      pi,
       ctx,
-      piConfig: { toolSync: { enabled: false, maxWait: 30 }, interaction: { timeout: 60 } },
+      piConfig: { toolSync: { enabled: false, maxWait: 30 } },
       parentToolNames: [],
-      subsessionManager,
-      coordinator,
+      subsessionManager: new SubsessionManager("/tmp", "/tmp/parent.jsonl"),
+      coordinator: makeCoordinator(m, onUpdate),
     });
 
-    // Tree should have received the usage update
     expect(tree.get(m.id)?.usage.input).toBe(50);
-    // The coordinator's minion usage should reflect the update
     expect(m.usage.input).toBe(50);
     expect(m.usage.output).toBe(25);
-    // onUpdate should have been triggered by the coordinator after usage update
     expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it("marks failed sessions as failed and returns an error result", async () => {
+    const tree = new AgentTree();
+    const ctx = createCtx();
+    const m = makeMinion();
+    tree.add(m.id, m.name, m.task);
+    vi.mocked(runMinionSession).mockResolvedValueOnce({
+      exitCode: 1,
+      finalOutput: "boom",
+      usage: emptyUsage(),
+      error: "boom",
+    });
+
+    const result = await runSingleMinion({
+      spec: { task: m.task },
+      m,
+      isSingleMinion: true,
+      toolCallId: "tc1",
+      controller: new AbortController(),
+      tree,
+      ctx,
+      piConfig: { toolSync: { enabled: false, maxWait: 30 } },
+      parentToolNames: [],
+      subsessionManager: new SubsessionManager("/tmp", "/tmp/parent.jsonl"),
+      coordinator: makeCoordinator(m),
+    });
+
+    expect(result.success).toBe(false);
+    expect(m.status).toBe("failed");
+    expect(tree.get(m.id)?.error).toBe("boom");
   });
 });

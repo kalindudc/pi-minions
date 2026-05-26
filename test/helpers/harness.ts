@@ -58,12 +58,6 @@ export class TestHarness {
     expect(metadata?.status).toBe("running");
   }
 
-  assertDetached(minionId: string): void {
-    const node = this.tree.get(minionId);
-    expect(node).toBeDefined();
-    expect(node?.detached).toBe(true);
-  }
-
   // Tool simulation helpers
   async simulateToolCall(toolName: string, args: Record<string, unknown>): Promise<void> {
     // Create a mock minion for this tool call

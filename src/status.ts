@@ -6,11 +6,8 @@ import type { AgentTree } from "./tree.js";
 
 export const MINIONS_STATUS_KEY = "minions-status";
 
-// Hint rotation interval in milliseconds
 const HINT_ROTATION_INTERVAL = 4000;
-
-// Static hints (always available)
-const STATIC_HINTS = ["/minions", "/minions list"];
+const STATIC_HINTS = ["/minions", "/minions list", "/minions learn"];
 
 export interface StatusTracker {
   refresh(): void;
@@ -24,49 +21,26 @@ export function createStatusTracker(
   ctx: ExtensionContext,
 ): StatusTracker {
   let cachedUi: ExtensionContext["ui"] | null = null;
-  let lastBgCount = -1;
-  let lastFgCount = -1;
+  let lastRunningCount = -1;
   let currentHintIndex = 0;
   let hintRotationTimer: ReturnType<typeof setInterval> | null = null;
 
-  /**
-   * Generate dynamic hints based on current minions
-   */
-  function generateHints(
-    bgRunning: { id: string; name: string }[],
-    fgRunning: { id: string; name: string }[],
-  ): string[] {
+  function generateHints(running: { id: string; name: string }[]): string[] {
     const hints: string[] = [...STATIC_HINTS];
 
-    // Add personalized hints for each foreground minion
-    for (const minion of fgRunning) {
-      hints.push(`/minions bg ${minion.name}`);
-      hints.push(`/minions steer ${minion.name} <message>`);
+    for (const minion of running) {
       hints.push(`/minions show ${minion.name}`);
-    }
-
-    // Add hints for background minions
-    for (const minion of bgRunning) {
-      hints.push(`/minions fg ${minion.name}`);
-      hints.push(`/minions show ${minion.name}`);
-      hints.push(`/minions halt ${minion.name}`);
+      hints.push(`/halt ${minion.name}`);
     }
 
     return hints;
   }
 
-  /**
-   * Get the next hint in rotation
-   */
   function getNextHint(hints: string[]): string {
     if (hints.length === 0) return "";
-    const hint = hints[currentHintIndex % hints.length];
-    return hint;
+    return hints[currentHintIndex % hints.length] ?? "";
   }
 
-  /**
-   * Start hint rotation timer
-   */
   function startHintRotation(): void {
     if (hintRotationTimer) {
       logger.debug("status", "rotation-already-running");
@@ -78,14 +52,10 @@ export function createStatusTracker(
     hintRotationTimer = setInterval(() => {
       currentHintIndex++;
       logger.debug("status", "rotation-tick", { index: currentHintIndex });
-      // Trigger a refresh to update the displayed hint
       refresh();
     }, HINT_ROTATION_INTERVAL);
   }
 
-  /**
-   * Stop hint rotation timer
-   */
   function stopHintRotation(): void {
     if (hintRotationTimer) {
       logger.debug("status", "rotation-stop");
@@ -95,18 +65,13 @@ export function createStatusTracker(
     currentHintIndex = 0;
   }
 
-  /**
-   * Format the status line: [oo] bg: <count>   ·   <hint>
-   */
-  function formatStatus(bgCount: number, fgCount: number, hint: string, theme: Theme): string {
+  function formatStatus(runningCount: number, hint: string, theme: Theme): string {
     const parts: string[] = [];
 
-    // Only show count if there are minions
-    if (bgCount > 0 || fgCount > 0) {
-      parts.push(`[oo] bg: ${bgCount}`);
+    if (runningCount > 0) {
+      parts.push(`[oo] minions: ${runningCount}`);
     }
 
-    // Add hint with separator
     if (hint) {
       if (parts.length > 0) {
         parts.push(`  ·  ${hint}`);
@@ -124,39 +89,21 @@ export function createStatusTracker(
       return;
     }
 
-    const allRunning = tree.getRunning();
-
-    // Background: marked as detached = running in background
-    const bgRunning = allRunning.filter((n) => n.detached).map((n) => ({ id: n.id, name: n.name }));
-    const bgCount = bgRunning.length;
-
-    // Foreground: not marked as detached = can be detached
-    const fgRunning = allRunning
-      .filter((n) => !n.detached)
-      .map((n) => ({ id: n.id, name: n.name }));
-    const fgCount = fgRunning.length;
-
-    // Determine if we need to update
-    const hasChanges = bgCount !== lastBgCount || fgCount !== lastFgCount;
+    const running = tree.getRunning().map((n) => ({ id: n.id, name: n.name }));
+    const runningCount = running.length;
+    const hasChanges = runningCount !== lastRunningCount;
 
     if (hasChanges) {
       logger.debug("status", "update", {
-        bgFrom: lastBgCount,
-        bgTo: bgCount,
-        fgFrom: lastFgCount,
-        fgTo: fgCount,
+        runningFrom: lastRunningCount,
+        runningTo: runningCount,
         hasTimer: !!hintRotationTimer,
-        allRunning: allRunning.map((n) => `${n.name}(${n.id})`),
-        bgMinions: bgRunning.map((n) => n.id),
+        running: running.map((n) => `${n.name}(${n.id})`),
       });
 
-      lastBgCount = bgCount;
-      lastFgCount = fgCount;
+      lastRunningCount = runningCount;
 
-      // Manage hint rotation based on total minions
-      // Keep rotating as long as there are minions to show hints for
-      const totalMinions = bgCount + fgCount;
-      if (totalMinions > 0) {
+      if (runningCount > 0) {
         startHintRotation();
       } else {
         logger.debug("status", "rotation-stop-trigger", {
@@ -166,20 +113,15 @@ export function createStatusTracker(
       }
     }
 
-    // Generate hints and get current one
     const config = getConfig(ctx);
-    const hints = config.display.showStatusHints ? generateHints(bgRunning, fgRunning) : [];
+    const hints = config.display.showStatusHints ? generateHints(running) : [];
     const currentHint = getNextHint(hints);
-
-    // Update status
     const { theme } = cachedUi;
-    const totalMinions = bgCount + fgCount;
 
-    if (totalMinions === 0) {
-      // Clear status when no minions
+    if (runningCount === 0) {
       cachedUi.setStatus(MINIONS_STATUS_KEY, undefined);
     } else {
-      const statusText = formatStatus(bgCount, fgCount, currentHint, theme);
+      const statusText = formatStatus(runningCount, currentHint, theme);
       cachedUi.setStatus(MINIONS_STATUS_KEY, statusText);
     }
   }

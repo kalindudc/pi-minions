@@ -100,19 +100,17 @@ export class BatchCoordinator {
     });
   }
 
-  getStatus(excludeIds?: Set<string>): AgentStatus {
-    const active = this.minions.filter((m) => !excludeIds?.has(m.id));
-    const hasExcluded = this.minions.some((m) => excludeIds?.has(m.id));
-
-    const anyAborted = active.some((m) => m.status === "aborted");
-    const anyFailed = active.some((m) => m.status === "failed");
-    const allCompleted = active.length > 0 && active.every((m) => m.status === "completed");
-    const anyRunning = active.some((m) => m.status === "running");
+  getStatus(): AgentStatus {
+    const anyAborted = this.minions.some((m) => m.status === "aborted");
+    const anyFailed = this.minions.some((m) => m.status === "failed");
+    const allCompleted =
+      this.minions.length > 0 && this.minions.every((m) => m.status === "completed");
+    const anyRunning = this.minions.some((m) => m.status === "running");
 
     if (anyAborted) return "aborted";
     if (anyFailed) return "failed";
     if (allCompleted) return "completed";
-    if (anyRunning || (hasExcluded && active.length === 0)) return "running";
+    if (anyRunning) return "running";
     return "failed";
   }
 

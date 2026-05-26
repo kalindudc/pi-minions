@@ -1,83 +1,69 @@
-import { describe, expect, it } from "vitest";
-import { parseSpawnArgs } from "../../src/commands/spawn.js";
+import { describe, expect, it, vi } from "vitest";
+import { createSpawnHandler, parseSpawnArgs } from "../../src/commands/spawn.js";
 
 describe("parseSpawnArgs", () => {
-  it("parses plain task with no flags", () => {
-    const result = parseSpawnArgs("do the thing");
-    expect(result).toEqual({
+  it("parses a foreground task with no flags", () => {
+    expect(parseSpawnArgs("do the thing")).toEqual({
       task: "do the thing",
       model: undefined,
-      background: false,
     });
   });
 
-  it("extracts --model flag and leaves rest as task", () => {
-    const result = parseSpawnArgs("do it --model claude-haiku-4-5");
-    expect(result).toEqual({
-      task: "do it",
-      model: "claude-haiku-4-5",
-      background: false,
-    });
-  });
-
-  it("handles --model at the start", () => {
-    const result = parseSpawnArgs("--model sonnet do the thing");
-    expect(result).toEqual({
-      task: "do the thing",
-      model: "sonnet",
-      background: false,
-    });
-  });
-
-  it("handles --model in the middle", () => {
-    const result = parseSpawnArgs("find all --model haiku files");
-    expect(result).toEqual({
+  it("extracts --model and leaves the remaining words as the task", () => {
+    expect(parseSpawnArgs("find all --model haiku files")).toEqual({
       task: "find all files",
       model: "haiku",
-      background: false,
     });
   });
 
-  it("extracts --bg flag", () => {
+  it("rejects background spawning with a clear error", () => {
     const result = parseSpawnArgs("do the thing --bg");
-    expect(result).toEqual({
-      task: "do the thing",
-      model: undefined,
-      background: true,
-    });
-  });
 
-  it("handles --bg at start", () => {
-    const result = parseSpawnArgs("--bg do the thing");
-    expect(result).toEqual({
-      task: "do the thing",
-      model: undefined,
-      background: true,
-    });
-  });
-
-  it("handles --bg with --model", () => {
-    const result = parseSpawnArgs("do it --bg --model haiku");
-    expect(result).toEqual({ task: "do it", model: "haiku", background: true });
-  });
-
-  it("returns error for empty input", () => {
-    const result = parseSpawnArgs("");
     expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toContain("Background spawning is not available");
   });
 
-  it("returns error for whitespace-only input", () => {
-    const result = parseSpawnArgs("   ");
+  it("rejects unsupported flags", () => {
+    const result = parseSpawnArgs("do the thing --later");
+
     expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toContain("Unsupported flag: --later");
   });
 
-  it("returns error when --model flag has no value", () => {
-    const result = parseSpawnArgs("do thing --model");
-    expect(result).toHaveProperty("error");
+  it("returns usage errors for empty input and missing model values", () => {
+    expect(parseSpawnArgs("")).toHaveProperty("error");
+    expect(parseSpawnArgs("   ")).toHaveProperty("error");
+    expect(parseSpawnArgs("do thing --model")).toHaveProperty("error");
+    expect(parseSpawnArgs("--model haiku")).toHaveProperty("error");
+  });
+});
+
+describe("createSpawnHandler", () => {
+  it("always directs the parent agent to use the foreground spawn tool", async () => {
+    const sendUserMessage = vi.fn();
+    const handler = createSpawnHandler({ sendUserMessage } as any);
+    const ctx = { ui: { notify: vi.fn() } } as any;
+
+    await handler("do work --model haiku", ctx);
+
+    expect(sendUserMessage).toHaveBeenCalledWith(
+      "Use the spawn tool to delegate this task to a minion: do work\nSet the model override to: haiku",
+      { deliverAs: "steer" },
+    );
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
-  it("returns error when task is empty after stripping --model", () => {
-    const result = parseSpawnArgs("--model haiku");
-    expect(result).toHaveProperty("error");
+  it("notifies parse errors instead of sending a directive", async () => {
+    const sendUserMessage = vi.fn();
+    const handler = createSpawnHandler({ sendUserMessage } as any);
+    const ctx = { ui: { notify: vi.fn() } } as any;
+
+    await handler("--bg do work", ctx);
+
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Background spawning is not available"),
+      "error",
+    );
   });
 });

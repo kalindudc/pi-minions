@@ -80,7 +80,6 @@ export async function runMinionSession(
     parentToolNames?: string[];
     toolSyncEnabled?: boolean;
     toolSyncMaxWait?: number;
-    interactionTimeout?: number;
     // biome-ignore lint/suspicious/noExplicitAny: external API type
     parentModel?: Model<any>;
     cwd: string;
@@ -153,7 +152,6 @@ export async function runMinionSession(
             parentToolNames: opts.parentToolNames,
             toolSyncEnabled: opts.toolSyncEnabled,
             toolSyncMaxWait: opts.toolSyncMaxWait,
-            interactionTimeout: opts.interactionTimeout,
 
             // Transcript logging + forward to caller callbacks
             // Tree updates are the caller's responsibility (via opts callbacks)

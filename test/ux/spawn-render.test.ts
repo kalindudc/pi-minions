@@ -46,19 +46,6 @@ describe("spawn rendering", () => {
 });
 
 describe("harness assertions", () => {
-  it("can assert detached state", async () => {
-    const harness = createTestHarness({ width: 120 });
-
-    await harness.simulateToolCall("spawn", { task: "detach test" });
-
-    const running = harness.tree.getRunning();
-    const id = running[0]?.id;
-    expect(id).toBeDefined();
-
-    harness.tree.markDetached(id!);
-    harness.assertDetached(id!);
-  });
-
   it("can assert session state", async () => {
     const harness = createTestHarness({ width: 120 });
 

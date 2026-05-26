@@ -36,7 +36,6 @@ function defaultConfig() {
   return {
     minionNames: ["test"],
     allowEphemeral: true,
-    delegation: { enabled: true, toolCallThreshold: 16, hintIntervalMinutes: 8 },
     display: {
       outputPreviewLines: 20,
       observabilityLines: 6,
@@ -44,7 +43,6 @@ function defaultConfig() {
       spinnerFrames: ["[oo]"],
     },
     toolSync: { enabled: true, maxWait: 5 },
-    interaction: { timeout: 300 },
   };
 }
 

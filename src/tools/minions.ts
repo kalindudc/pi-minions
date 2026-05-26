@@ -1,85 +1,15 @@
 import type { AgentToolResult, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import type { ResultQueue } from "../queue.js";
 import { formatDuration, formatUsage } from "../render.js";
-import type { SubsessionManager } from "../subsessions/manager.js";
 import { getMinionHistory } from "../subsessions/observability.js";
 import type { AgentTree } from "../tree.js";
-import type { AgentNode } from "../types.js";
-
-// Shared validation helpers
-
-/**
- * Result of validating a minion for steering operations
- */
-export type SteerValidationResult =
-  | { success: false; error: string; errorType: "error" | "info" }
-  | { success: true; node: AgentNode; steer: (text: string) => Promise<void> };
-
-/**
- * Validates that a target can be steered and returns the node/steer function or error details
- */
-export function validateSteerTarget(
-  tree: AgentTree,
-  subsessionManager: SubsessionManager,
-  target: string,
-): SteerValidationResult {
-  const node = tree.resolve(target);
-  if (!node) {
-    return {
-      success: false,
-      error: `Minion not found: ${target}`,
-      errorType: "error",
-    };
-  }
-
-  if (node.status !== "running") {
-    return {
-      success: false,
-      error: `Minion ${node.name} (${node.id}) is not running (status: ${node.status}).`,
-      errorType: "info",
-    };
-  }
-
-  const session = subsessionManager.getSession(node.id);
-  if (!session) {
-    return {
-      success: false,
-      error: `No active session for ${node.name} (${node.id}).`,
-      errorType: "error",
-    };
-  }
-
-  return { success: true, node, steer: (text) => session.steer(text) };
-}
-
-/**
- * Executes steering operation and returns success message
- */
-export async function executeSteering(
-  node: AgentNode,
-  steer: (text: string) => Promise<void>,
-  message: string,
-): Promise<string> {
-  const wrappedMessage =
-    `[USER STEER] The user has provided an additional directive while you are working.\n` +
-    `DO NOT abandon or restart your current task. Continue where you left off.\n` +
-    `Treat this steer as a supplementary task to handle alongside your original assignment.\n` +
-    `When you deliver your final output, include results from both your original task AND this steer directive.\n` +
-    `Explicitly note that you received a user steer and include the steer task verbatim.\n\n` +
-    `User's steer message: ${message}`;
-  await steer(wrappedMessage);
-  return `Steered ${node.name} (${node.id}): ${message}`;
-}
-
-// list_minions
+import type { AgentNode, AgentStatus } from "../types.js";
 
 export const ListMinionsParams = Type.Object(
   {},
   {
-    description:
-      "List all running and completed (pending delivery) minions. No parameters required.",
+    description: "List all foreground minions in the current session. No parameters required.",
   },
 );
 export type ListMinionsParams = Static<typeof ListMinionsParams>;
@@ -88,155 +18,104 @@ export interface MinionInfo {
   id: string;
   name: string;
   task: string;
-  status: "running";
-  mode: "foreground" | "background";
+  status: AgentStatus;
+  agentName?: string;
+  model?: string;
   lastActivity?: string;
 }
 
-export interface PendingMinionInfo {
-  id: string;
-  name: string;
-  task: string;
-  completedAt: number;
-  exitCode: number;
+function collectMinions(tree: AgentTree): AgentNode[] {
+  const nodes: AgentNode[] = [];
+
+  const visit = (node: AgentNode) => {
+    nodes.push(node);
+    for (const childId of node.children) {
+      const child = tree.get(childId);
+      if (child) visit(child);
+    }
+  };
+
+  for (const root of tree.getRoots()) visit(root);
+  return nodes;
 }
 
-export function listMinions(tree: AgentTree, queue: ResultQueue) {
+function toInfo(node: AgentNode): MinionInfo {
+  return {
+    id: node.id,
+    name: node.name,
+    task: node.task,
+    status: node.status,
+    agentName: node.agentName,
+    model: node.model,
+    lastActivity: node.lastActivity,
+  };
+}
+
+function displayName(node: AgentNode): string {
+  return node.agentName && node.agentName !== "ephemeral"
+    ? `${node.agentName} ${node.name}`
+    : node.name;
+}
+
+export function listMinions(tree: AgentTree) {
   return async function execute(
     _toolCallId: string,
     _params: ListMinionsParams,
     _signal: AbortSignal | undefined,
     _onUpdate: unknown,
     _ctx: ExtensionContext,
-  ): Promise<AgentToolResult<{ running: MinionInfo[]; pending: PendingMinionInfo[] }>> {
-    const running: MinionInfo[] = tree.getRunning().map((n) => ({
-      id: n.id,
-      name: n.name,
-      task: n.task,
-      status: "running" as const,
-      mode: (n.detached ? "background" : "foreground") as "foreground" | "background",
-      lastActivity: n.lastActivity,
-    }));
-    const pending: PendingMinionInfo[] = queue.getPending().map((r) => ({
-      id: r.id,
-      name: r.name,
-      task: r.task,
-      completedAt: r.completedAt,
-      exitCode: r.exitCode,
-    }));
+  ): Promise<AgentToolResult<{ minions: MinionInfo[] }>> {
+    const minions = collectMinions(tree).map(toInfo);
 
     const lines: string[] = [];
-    if (running.length === 0 && pending.length === 0) {
+    if (minions.length === 0) {
       lines.push("No active minions.");
     } else {
-      lines.push(`Running (${running.length}):`);
-      for (const m of running) {
-        const mode = m.mode === "background" ? "[bg]" : "[fg]";
+      lines.push(`Minions (${minions.length}):`);
+      for (const m of minions) {
+        const model = m.model ? ` [${m.model}]` : "";
         const activity = m.lastActivity ? ` -- ${m.lastActivity}` : "";
-        lines.push(`  ${m.name} (${m.id}) ${mode}: ${m.task}${activity}`);
-      }
-      lines.push(`Completed (${pending.length}):`);
-      for (const p of pending) {
-        lines.push(`  ${p.name} (${p.id}): exit ${p.exitCode}`);
+        lines.push(`  ${m.name} (${m.id}) [${m.status}]${model}: ${m.task}${activity}`);
       }
     }
 
     return {
       content: [{ type: "text", text: lines.join("\n") }],
-      details: { running, pending },
+      details: { minions },
     };
   };
 }
 
-// steer_minion
-
-export const SteerMinionParams = Type.Object({
-  target: Type.String({ description: "Minion ID or name to steer" }),
-  message: Type.String({
-    description: "Message to inject into the minion's context before its next LLM call",
-  }),
-});
-export type SteerMinionParams = Static<typeof SteerMinionParams>;
-
-export function steerMinion(tree: AgentTree, subsessionManager: SubsessionManager) {
-  return async function execute(
-    _toolCallId: string,
-    params: SteerMinionParams,
-    _signal: AbortSignal | undefined,
-    _onUpdate: unknown,
-    _ctx: ExtensionContext,
-  ): Promise<AgentToolResult<unknown>> {
-    const validation = validateSteerTarget(tree, subsessionManager, params.target);
-    if (!validation.success) {
-      throw new Error(validation.error);
-    }
-
-    const successMessage = await executeSteering(validation.node, validation.steer, params.message);
-    return {
-      content: [{ type: "text", text: successMessage }],
-      details: undefined,
-    };
-  };
-}
-
-// show_minion
-
-export function buildShowMinionText(
-  tree: AgentTree,
-  queue: ResultQueue,
-  target: string,
-): string | null {
+export function buildShowMinionText(tree: AgentTree, target: string): string | null {
   const node = tree.resolve(target);
-  const result = node ? queue.get(node.id) : queue.get(target);
-
-  if (!node && !result) {
-    return null;
-  }
+  if (!node) return null;
 
   const lines: string[] = [];
-  if (node) {
-    // Header with mode badge and agent name
-    const mode = node.detached ? "[bg]" : "[fg]";
-    const displayName =
-      node.agentName && node.agentName !== "ephemeral"
-        ? `${node.agentName} ${node.name}`
-        : node.name;
-    lines.push(`${displayName} (${node.id}) ${mode}`);
-    lines.push(`  Status: ${node.status}`);
-    lines.push(`  Task: ${node.task}`);
+  lines.push(`${displayName(node)} (${node.id})`);
+  lines.push(`  Status: ${node.status}`);
+  lines.push(`  Task: ${node.task}`);
+  if (node.model) lines.push(`  Model: ${node.model}`);
 
-    if (node.status === "running") {
-      lines.push(`  Running for: ${formatDuration(Date.now() - node.startTime)}`);
-      if (node.lastActivity) lines.push(`  Activity: ${node.lastActivity}`);
-    }
-
-    if (node.endTime) lines.push(`  Duration: ${formatDuration(node.endTime - node.startTime)}`);
-    const usageText = formatUsage(node.usage);
-    lines.push(`  Usage: ${usageText || "N/A"}`);
-    if (node.error) lines.push(`  Error: ${node.error}`);
-
-    // Include recent activity history
-    const history = node.activityHistory ?? getMinionHistory(node.id);
-    if (history.length > 0) {
-      lines.push(`  Recent activity:`);
-      for (const msg of history) {
-        lines.push(`    ${msg}`);
-      }
-    }
-
-    // Suggest interactive view for live updates
-    if (node.status === "running") {
-      lines.push(`\n  Tip: Use '/minions show ${node.name}' for live activity stream`);
-    }
+  if (node.status === "running") {
+    lines.push(`  Running for: ${formatDuration(Date.now() - node.startTime)}`);
+    if (node.lastActivity) lines.push(`  Activity: ${node.lastActivity}`);
   }
-  if (result) {
-    if (!node) lines.push(`${result.name} (${result.id})`);
-    lines.push(`  Exit code: ${result.exitCode}`);
-    if (result.output) {
-      const preview = result.output.split("\n").slice(0, 10).join("\n");
-      lines.push(`  Output:\n${preview}`);
-    }
+
+  if (node.endTime) lines.push(`  Duration: ${formatDuration(node.endTime - node.startTime)}`);
+  const usageText = formatUsage(node.usage);
+  lines.push(`  Usage: ${usageText || "N/A"}`);
+  if (node.error) lines.push(`  Error: ${node.error}`);
+
+  const history = node.activityHistory ?? getMinionHistory(node.id);
+  if (history.length > 0) {
+    lines.push("  Recent activity:");
+    for (const msg of history) lines.push(`    ${msg}`);
   }
+
+  if (node.status === "running") {
+    lines.push(`\n  Tip: Use '/minions show ${node.name}' for live activity stream`);
+  }
+
   return lines.join("\n");
 }
 
@@ -245,7 +124,7 @@ export const ShowMinionParams = Type.Object({
 });
 export type ShowMinionParams = Static<typeof ShowMinionParams>;
 
-export function showMinion(tree: AgentTree, queue: ResultQueue) {
+export function showMinion(tree: AgentTree) {
   return async function execute(
     _toolCallId: string,
     params: ShowMinionParams,
@@ -253,7 +132,7 @@ export function showMinion(tree: AgentTree, queue: ResultQueue) {
     _onUpdate: unknown,
     _ctx: ExtensionContext,
   ): Promise<AgentToolResult<unknown>> {
-    const text = buildShowMinionText(tree, queue, params.target);
+    const text = buildShowMinionText(tree, params.target);
     if (text === null) {
       throw new Error(`Minion not found: ${params.target}`);
     }

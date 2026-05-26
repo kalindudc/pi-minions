@@ -1,54 +1,21 @@
-import { readFileSync } from "node:fs";
-
-// Helper function to reverse changelog sections so newest appears first
-function reverseChangelog(content: string): string {
-  const lines = content.split("\n");
-  const sections: string[][] = [];
-  let currentSection: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith("## [")) {
-      if (currentSection.length > 0) {
-        sections.push(currentSection);
-      }
-      currentSection = [line];
-    } else {
-      currentSection.push(line);
-    }
-  }
-
-  if (currentSection.length > 0) {
-    sections.push(currentSection);
-  }
-
-  // Reverse sections and flatten
-  const reversed = sections.reverse().flat();
-  return reversed.join("\n");
-}
-
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { discoverAgents } from "../agents.js";
 import { getConfig } from "../config.js";
 import { logger } from "../logger.js";
-import type { ResultQueue } from "../queue.js";
+import { getMinionsSkill } from "../skill.js";
 import type { EventBus } from "../subsessions/event-bus.js";
-import type { SubsessionManager } from "../subsessions/manager.js";
 import { showMinionObservability } from "../subsessions/observability.js";
-import { executeSteering, validateSteerTarget } from "../tools/minions.js";
-import { detachMinion } from "../tools/spawn.js";
 import type { AgentTree } from "../tree.js";
-import { CHANGELOG_PATH, VERSION } from "../version.js";
+import { VERSION } from "../version.js";
 
 type ParsedArgs =
   | { action: "list" }
+  | { action: "learn" }
+  | { action: "skill" }
   | { action: "version" }
-  | { action: "changelog" }
   | { action: "help" }
   | { action: "show-running" }
   | { action: "show"; target: string }
-  | { action: "bg"; target: string }
-  | { action: "fg"; target: string }
-  | { action: "steer"; target: string; message: string }
   | { error: string };
 
 export function parseMinionArgs(args: string): ParsedArgs {
@@ -59,42 +26,16 @@ export function parseMinionArgs(args: string): ParsedArgs {
   const action = tokens[0];
 
   if (action === "list") return { action: "list" };
+  if (action === "learn") return { action: "learn" };
+  if (action === "skill") return { action: "skill" };
 
   if (action === "show" || action === "s") {
     const target = tokens.slice(1).join(" ").trim();
-    if (!target) {
-      return { error: `Usage: /minions show <id | name>` };
-    }
+    if (!target) return { error: "Usage: /minions show <id | name>" };
     return { action: "show", target };
   }
 
-  if (action === "bg") {
-    const target = tokens.slice(1).join(" ").trim();
-    if (!target) {
-      return { error: `Usage: /minions bg <id | name>` };
-    }
-    return { action, target };
-  }
-
-  if (action === "fg") {
-    const target = tokens.slice(1).join(" ").trim();
-    if (!target) {
-      return { error: `Usage: /minions fg <id | name>` };
-    }
-    return { action: "fg", target };
-  }
-
-  if (action === "steer") {
-    if (tokens.length < 3) {
-      return { error: "Usage: /minions steer <id | name> <message>" };
-    }
-    const target = tokens[1] ?? "";
-    const message = tokens.slice(2).join(" ");
-    return { action: "steer", target, message };
-  }
-
   if (action === "version") return { action: "version" };
-  if (action === "changelog") return { action: "changelog" };
   if (action === "help" || action === "h") return { action: "help" };
 
   return {
@@ -102,7 +43,6 @@ export function parseMinionArgs(args: string): ParsedArgs {
   };
 }
 
-// Get alphabetically sorted list of running minions
 function getSortedMinionIds(tree: AgentTree): string[] {
   const running = tree.getRunning();
   return running
@@ -111,7 +51,6 @@ function getSortedMinionIds(tree: AgentTree): string[] {
     .map((m) => m.id);
 }
 
-// Show minion observability with cycling support
 async function showMinionWithCycling(
   ctx: ExtensionCommandContext,
   tree: AgentTree,
@@ -125,15 +64,12 @@ async function showMinionWithCycling(
     if (sortedIds.length === 0) return null;
 
     const currentIndex = sortedIds.indexOf(currentId);
-    if (currentIndex === -1) {
-      return sortedIds[0] ?? null;
-    }
+    if (currentIndex === -1) return sortedIds[0] ?? null;
 
     if (direction === "next") {
       return sortedIds[(currentIndex + 1) % sortedIds.length] ?? null;
-    } else {
-      return sortedIds[(currentIndex - 1 + sortedIds.length) % sortedIds.length] ?? null;
     }
+    return sortedIds[(currentIndex - 1 + sortedIds.length) % sortedIds.length] ?? null;
   };
 
   while (currentId) {
@@ -149,11 +85,8 @@ async function showMinionWithCycling(
       return;
     }
 
-    if (result.action === "back") {
-      return;
-    }
+    if (result.action === "back") return;
 
-    // result.action === "cycle" - user pressed tab/shift+tab
     if (nextId) {
       currentId = nextId;
     } else {
@@ -177,16 +110,9 @@ export function showListMinions(ctx: ExtensionCommandContext) {
 
   ctx.ui.notify(lines.join("\n"), "info");
   logger.debug("minions:cmd", "list-complete", { agentCount: agents.length });
-  return;
 }
 
-export function createMinionsHandler(
-  tree: AgentTree,
-  _queue: ResultQueue,
-  subsessionManager: SubsessionManager,
-  eventBus: EventBus,
-  pi: ExtensionAPI,
-) {
+export function createMinionsHandler(tree: AgentTree, eventBus: EventBus) {
   return async function handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
     logger.debug("minions:cmd", "handler-called", { args: args.trim() || "(empty)" });
 
@@ -201,14 +127,18 @@ export function createMinionsHandler(
       return;
     }
 
-    // list → show available agent types (alias of list_agents)
     if (parsed.action === "list") {
       logger.debug("minions:cmd", "list");
-
-      return showListMinions(ctx);
+      showListMinions(ctx);
+      return;
     }
 
-    // show-running → open minion view with cycling (default behavior)
+    if (parsed.action === "learn" || parsed.action === "skill") {
+      logger.debug("minions:cmd", parsed.action);
+      ctx.ui.notify(getMinionsSkill(), "info");
+      return;
+    }
+
     if (parsed.action === "show-running") {
       logger.debug("minions:cmd", "show-running");
       const sortedIds = getSortedMinionIds(tree);
@@ -228,44 +158,15 @@ export function createMinionsHandler(
       return;
     }
 
-    if (parsed.action === "changelog") {
-      logger.debug("minions:cmd", "changelog", { changelogPath: CHANGELOG_PATH });
-
-      try {
-        const content = readFileSync(CHANGELOG_PATH, "utf-8");
-        logger.debug("minions:cmd", "changelog-read", { contentLength: content.length });
-        const reversedContent = reverseChangelog(content);
-        logger.debug("minions:cmd", "changelog-reversed");
-
-        pi.sendMessage({
-          customType: "minion-changelog",
-          content: "",
-          display: true,
-          details: { content: reversedContent },
-        });
-
-        logger.debug("minions:cmd", "changelog-sent");
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.debug("minions:cmd", "changelog-error", { error: errorMessage });
-        ctx.ui.notify(`Failed to read changelog: ${errorMessage}`, "error");
-      }
-      return;
-    }
-
     if (parsed.action === "help") {
       logger.debug("minions:cmd", "help");
 
       const lines = ["Available /minions subcommands:"];
-      lines.push("  bg <id|name>       - Send a foreground minion to background");
-      lines.push("  changelog          - Show the extension changelog");
-      lines.push(
-        "  fg <id|name>       - Bring a background minion to foreground (blocks with progress)",
-      );
       lines.push("  h, help            - Show this help message");
+      lines.push("  learn              - Show minion usage guidance");
       lines.push("  list               - List available agent types");
-      lines.push("  s, show <id|name>  - Show detailed status of a specific minion");
-      lines.push("  steer <id> <msg>   - Send a steering message to a running minion");
+      lines.push("  s, show <id|name>  - Show live activity for a specific minion");
+      lines.push("  skill              - Show the agentic minions skill text");
       lines.push("  version            - Show the extension version");
 
       ctx.ui.notify(lines.join("\n"), "info");
@@ -273,108 +174,12 @@ export function createMinionsHandler(
       return;
     }
 
-    // show → open specific minion view with cycling
-    if (parsed.action === "show") {
-      const node = tree.resolve(parsed.target);
-      if (!node) {
-        ctx.ui.notify(`Minion not found: ${parsed.target}`, "error");
-        return;
-      }
-
-      await showMinionWithCycling(ctx, tree, eventBus, node.id);
+    const node = tree.resolve(parsed.target);
+    if (!node) {
+      ctx.ui.notify(`Minion not found: ${parsed.target}`, "error");
       return;
     }
 
-    if (parsed.action === "steer") {
-      const validation = validateSteerTarget(tree, subsessionManager, parsed.target);
-      if (validation.success === false) {
-        ctx.ui.notify(validation.error, validation.errorType);
-        return;
-      }
-
-      const successMessage = await executeSteering(
-        validation.node,
-        validation.steer,
-        parsed.message,
-      );
-      ctx.ui.notify(successMessage, "info");
-      return;
-    }
-
-    // bg → signals the foreground spawn to detach
-    if (parsed.action === "bg") {
-      logger.debug("minions:cmd", "bg", { target: parsed.target });
-      const node = tree.resolve(parsed.target);
-      if (!node) {
-        logger.debug("minions:cmd", "bg-not-found", { target: parsed.target });
-        ctx.ui.notify(`Minion not found: ${parsed.target}`, "error");
-        return;
-      }
-      if (node.status !== "running") {
-        ctx.ui.notify(
-          `Minion ${node.name} (${node.id}) is not running (status: ${node.status}).`,
-          "info",
-        );
-        return;
-      }
-
-      // Check if session exists (foreground) or just metadata (background)
-      const session = subsessionManager.getSession(node.id);
-      if (!session) {
-        ctx.ui.notify(`Minion ${node.name} (${node.id}) is already running in background.`, "info");
-        return;
-      }
-
-      logger.debug("minions:cmd", "bg-detaching", {
-        id: node.id,
-        name: node.name,
-      });
-      detachMinion(node.id);
-      // Mark as detached for [fg]/[bg] badge (deviation 10)
-      tree.markDetached(node.id);
-      logger.debug("minions:cmd", "bg-detached", {
-        id: node.id,
-        name: node.name,
-      });
-      ctx.ui.notify(`Sent ${node.name} (${node.id}) to background.`, "info");
-      return;
-    }
-
-    // fg → brings a background minion to foreground
-    if (parsed.action === "fg") {
-      logger.debug("minions:cmd", "fg", { target: parsed.target });
-      const node = tree.resolve(parsed.target);
-      if (!node) {
-        logger.debug("minions:cmd", "fg-not-found", { target: parsed.target });
-        ctx.ui.notify(`Minion not found: ${parsed.target}`, "error");
-        return;
-      }
-      if (node.status !== "running") {
-        ctx.ui.notify(
-          `Minion ${node.name} (${node.id}) is not running (status: ${node.status}).`,
-          "info",
-        );
-        return;
-      }
-      if (!node.detached) {
-        ctx.ui.notify(`Minion ${node.name} (${node.id}) is already in foreground.`, "info");
-        return;
-      }
-
-      logger.debug("minions:cmd", "fg-requesting", {
-        id: node.id,
-        name: node.name,
-      });
-
-      // Send directive to parent to use spawn tool with ids parameter
-      // This is the same pattern used by /spawn command
-      pi.sendUserMessage(
-        `Use the spawn tool with ids=["${node.name}"] to bring this background minion to foreground.`,
-        { deliverAs: "steer" },
-      );
-
-      logger.debug("minions:cmd", "fg-request-sent", { id: node.id, name: node.name });
-      return;
-    }
+    await showMinionWithCycling(ctx, tree, eventBus, node.id);
   };
 }

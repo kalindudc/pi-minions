@@ -248,21 +248,18 @@ class MinionObservabilityWidget {
     const dim = (s: string) => theme.fg("dim", s);
     const muted = (s: string) => theme.fg("muted", s);
 
-    // Get node to check detached status and agent name
     const node = this.tree.get(this.minionId);
-    const isDetached = node?.detached ?? false;
-    const badge = isDetached ? "[bg]" : "[fg]";
 
-    // Header line: badge + agent name + minion name + id + help
+    // Header line: agent name + minion name + id + help
     const displayName =
       node?.agentName && node.agentName !== "ephemeral"
         ? `${node.agentName} ${this.minionName}`
         : this.minionName;
     const modelTag = node?.model ? ` [${node.model}]` : "";
-    const headerText = `${badge} ${displayName} (${this.minionId})${modelTag}`;
+    const headerText = `${displayName} (${this.minionId})${modelTag}`;
     const helpText = "q/esc:close · tab/shift+tab:navigate";
 
-    // Header with accent for badge+name, dim for help
+    // Header with accent for name, dim for help
     const headerLine = `${theme.fg("accent", this.truncate(headerText, width - helpText.length - 3))}  ${dim(helpText)}`;
     lines.push(headerLine);
 

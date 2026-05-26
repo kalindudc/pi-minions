@@ -54,16 +54,13 @@ export function renderBatchMinions(
   const lines: string[] = [];
 
   for (const m of minions) {
-    const isDetached = m.detached;
-    const isRunning = m.status === "running" && !isDetached;
+    const isRunning = m.status === "running";
     const isAborted = m.status === "aborted";
     const isError = m.status === "failed";
     const isCompleted = m.status === "completed";
 
     let icon: string;
-    if (isDetached) {
-      icon = "▢ ";
-    } else if (isAborted) {
+    if (isAborted) {
       icon = "■";
     } else if (isError) {
       icon = "✗";
@@ -74,9 +71,7 @@ export function renderBatchMinions(
     }
 
     let color: "accent" | "warning" | "error" | "success" | "text" | "muted" | "dim";
-    if (isDetached) {
-      color = "muted";
-    } else if (isCompleted) {
+    if (isCompleted) {
       color = "success";
     } else if (isAborted) {
       color = "warning";
@@ -103,9 +98,7 @@ export function renderBatchMinions(
       line += ` ${theme.fg("dim", `[${m.model}]`)}`;
     }
 
-    if (isDetached) {
-      line += ` ${theme.fg("dim", "sent to background")}`;
-    } else if (isRunning && m.activity) {
+    if (isRunning && m.activity) {
       // Calculate available width for activity text
       const terminalWidth = process.stdout.columns || 80;
       const prefixWidth = visibleWidth(line);
@@ -138,7 +131,6 @@ export function renderSingleMinion(
   let spinnerFrame = data.spinnerFrame;
   let model = data.model;
   let id = data.id;
-  let detached = data.detached;
 
   if (data.minions && data.minions.length > 0) {
     // If we have batch minions but only one, render it as a single minion for better detail
@@ -151,20 +143,16 @@ export function renderSingleMinion(
     spinnerFrame = data.minions[0].spinnerFrame;
     model = data.minions[0].model;
     id = data.minions[0].id;
-    detached = data.minions[0].detached;
   }
 
-  const isRunning = status === "running" && !detached;
+  const isRunning = status === "running";
   const isAborted = status === "aborted";
   const isError = status === "failed";
 
   // Status icon and color
   let icon: string;
   let statusColor: "accent" | "warning" | "error" | "success" | "text" | "muted" | "dim";
-  if (detached) {
-    icon = "▢ ";
-    statusColor = "muted";
-  } else if (isAborted) {
+  if (isAborted) {
     icon = "■";
     statusColor = "warning";
   } else if (isError) {
@@ -197,11 +185,8 @@ export function renderSingleMinion(
     header += `  ${theme.fg("muted", `—  ${usageText}`)}`;
   }
 
-  // Activity line (if running or detached)
   let body = "";
-  if (detached) {
-    body = `${theme.fg("dim", `  │`)}\n${theme.fg("dim", `  ╰  sent to background`)}`;
-  } else if (isRunning && activity) {
+  if (isRunning && activity) {
     body = `${theme.fg("dim", `  │`)}\n${theme.fg("dim", `  ╰  ${activity ?? "thinking…"}`)}`;
   }
 

@@ -46,14 +46,6 @@ export class MockAgentTree {
     return Array.from(this.nodes.values()).filter((n) => n.status === "running");
   }
 
-  markDetached(id: string): void {
-    const node = this.nodes.get(id);
-    if (!node) return;
-
-    node.detached = true;
-    this.notify();
-  }
-
   updateStatus(id: string, status: AgentStatus, exitCode?: number, error?: string): void {
     const node = this.nodes.get(id);
     if (!node) return;

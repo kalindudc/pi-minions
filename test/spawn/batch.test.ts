@@ -130,12 +130,6 @@ describe("BatchCoordinator", () => {
     expect(coordinator.getStatus()).toBe("running");
   });
 
-  it("getStatus returns running when all minions are excluded (detached)", () => {
-    const minions = [makeMinion({ status: "running" })];
-    const coordinator = createCoordinator(minions);
-    expect(coordinator.getStatus(new Set(["m1"]))).toBe("running");
-  });
-
   it("getUsage sums all fields across minions", () => {
     const minions = [
       makeMinion({

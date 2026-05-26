@@ -12,6 +12,3 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 
 export const VERSION: string = packageJson.version;
 logger.debug("version", "version-loaded", { version: VERSION });
-
-export const CHANGELOG_PATH: string = resolve(__dirname, "../CHANGELOG.md");
-logger.debug("version", "changelog-path", { path: CHANGELOG_PATH });

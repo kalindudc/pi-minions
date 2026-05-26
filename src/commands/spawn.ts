@@ -1,19 +1,21 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 
-export function parseSpawnArgs(
-  args: string,
-): { task: string; model?: string; background: boolean } | { error: string } {
+const USAGE = "Usage: /spawn <task> [--model <model>]";
+
+export function parseSpawnArgs(args: string): { task: string; model?: string } | { error: string } {
   const tokens = args.trim().split(/\s+/);
 
   if (tokens.length === 0 || tokens[0] === "") {
-    return { error: "Usage: /spawn <task> [--model <model>] [--bg]" };
+    return { error: USAGE };
   }
 
-  const bgIdx = tokens.indexOf("--bg");
-  let background = false;
-  if (bgIdx !== -1) {
-    background = true;
-    tokens.splice(bgIdx, 1);
+  if (tokens.includes("--bg")) {
+    return { error: `Background spawning is not available. ${USAGE}` };
+  }
+
+  const unsupported = tokens.find((token) => token.startsWith("--") && token !== "--model");
+  if (unsupported) {
+    return { error: `Unsupported flag: ${unsupported}. ${USAGE}` };
   }
 
   const modelFlagIdx = tokens.indexOf("--model");
@@ -23,9 +25,7 @@ export function parseSpawnArgs(
   if (modelFlagIdx !== -1) {
     const modelValue = tokens[modelFlagIdx + 1];
     if (!modelValue || modelValue.startsWith("--")) {
-      return {
-        error: "Usage: /spawn <task> [--model <model>] [--bg] -- --model requires a value",
-      };
+      return { error: `${USAGE} -- --model requires a value` };
     }
     model = modelValue;
     for (let i = 0; i < tokens.length; i++) {
@@ -39,12 +39,10 @@ export function parseSpawnArgs(
 
   const task = remaining.join(" ").trim();
   if (!task) {
-    return {
-      error: "Usage: /spawn <task> [--model <model>] [--bg] -- task cannot be empty",
-    };
+    return { error: `${USAGE} -- task cannot be empty` };
   }
 
-  return { task, model, background };
+  return { task, model };
 }
 
 export function createSpawnHandler(pi: ExtensionAPI) {
@@ -55,8 +53,7 @@ export function createSpawnHandler(pi: ExtensionAPI) {
       return;
     }
 
-    const tool = parsed.background ? "spawn_bg" : "spawn";
-    let directive = `Use the ${tool} tool to delegate this task to a minion: ${parsed.task}`;
+    let directive = `Use the spawn tool to delegate this task to a minion: ${parsed.task}`;
     if (parsed.model) directive += `\nSet the model override to: ${parsed.model}`;
     pi.sendUserMessage(directive, { deliverAs: "steer" });
   };

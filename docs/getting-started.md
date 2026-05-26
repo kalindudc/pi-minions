@@ -1,140 +1,80 @@
 # Getting started
 
-> See also: [Patterns](patterns.md) · [Agents](agents.md) · [Reference](reference.md) · [Architecture](architecture.md)
+This tutorial walks through foreground minion delegation in pi.
 
-A hands-on walkthrough — from installation to spawning your first minion, running background tasks, and creating a custom agent. About 10 minutes.
+## 1. Spawn one foreground minion
 
-## Prerequisites
-
-- [pi](https://github.com/mariozechner/pi-coding-agent) installed and working
-- A project directory to work in
-
-## Installation
-
-```bash
-pi install npm:pi-minions
+```text
+/spawn Read src/index.ts and summarize the registered tools
 ```
 
-That's it. pi-minions registers its tools and commands automatically on next session start.
+The parent waits for the minion result. Progress is streamed while the minion runs.
 
-## Your first minion
+## 2. Spawn a batch of foreground minions
 
-Start a pi session and spawn a foreground minion:
+Use the LLM-callable `spawn` tool with `tasks` when subtasks are independent:
 
-```bash
-/spawn Summarize the directory structure of this project
+```ts
+spawn({
+  tasks: [
+    { task: "Review src/tools for public API changes" },
+    { task: "Review test/tools for coverage gaps" }
+  ]
+})
 ```
 
-What happens:
-1. pi-minions creates an isolated session (a **minion**) with its own context
-2. The minion receives your task and starts working — you'll see streaming progress
-3. When it finishes, the result is returned directly to your session
-4. Your parent session continues with the minion's findings in context
+Each task runs in an isolated foreground session and the parent receives a combined result.
 
-The parent blocks while the minion runs. This is intentional — foreground spawns are for tasks where you need the result before continuing.
+## 3. Pick named agents
 
-> [!TIP]
-> You don't have to use commands. Natural language works too — ask the LLM to delegate:
->
-> "Use a minion to research the error handling patterns in this codebase"
+List available named agents before choosing one:
 
-## Running tasks in the background
-
-For longer tasks, spawn minions in the background:
-
-```bash
-/spawn --bg Run the test suite and report any failures
+```ts
+list_agents({})
+spawn({ agent: "researcher", task: "Compare two implementation options" })
 ```
 
-The command returns immediately with the minion's name and ID. The minion runs independently, and its result is auto-delivered to your session when it finishes.
+If no `agent` is supplied, pi-minions uses an ephemeral built-in minion when enabled.
 
-Check on running minions:
+## 4. Inspect foreground activity
 
-```bash
+```text
 /minions
-```
-
-This shows all running and pending (completed, awaiting delivery) minions.
-
-## Managing minions
-
-### Check detailed status
-
-```bash
 /minions show kevin
 ```
 
-Shows the minion's task, current activity, output so far, and token usage.
+The default `/minions` command opens the live activity view for the first running minion. `/minions show <id|name>` opens a specific minion.
 
-### Steer a running minion
+The LLM-callable equivalents are:
 
-Change a minion's focus mid-execution:
-
-```bash
-/minions steer kevin "Focus only on the src/ directory, skip tests"
+```ts
+list_minions({})
+show_minion({ target: "kevin" })
 ```
 
-### Detach a slow foreground task
+## 5. Halt a running minion
 
-Started a foreground spawn that's taking too long? Detach it to background:
-
-```bash
-/minions bg kevin
-```
-
-The same session continues in the background — no interruption, no lost progress. The result will be queued and delivered when complete.
-
-### Halt a minion
-
-Stop a minion that's off-track or wasting tokens:
-
-```bash
+```text
 /halt kevin
 ```
 
-Or stop everything:
+Or from a tool call:
 
-```bash
-/halt all
+```ts
+halt({ id: "all" })
 ```
 
-## Creating your first agent
+## 6. Learn the surface in-session
 
-Agents are reusable minion configurations. Create one for research tasks:
-
-```bash
-mkdir -p .pi/agents
-
-cat > .pi/agents/researcher.md << 'EOF'
----
-name: researcher
-description: Research topics with structured findings
-model: claude-sonnet-4-20250514
-steps: 30
----
-
-You are a research agent. Investigate the given topic thoroughly.
-
-- Use tools to search, read files, and gather evidence
-- Cite specific file paths and line numbers
-- Summarize findings with confidence levels
-- Flag areas that need human verification
-EOF
+```text
+/minions learn
+/minions skill
 ```
 
-Now use it:
+Or:
 
-```bash
-/spawn --agent researcher What testing patterns does this project use?
+```ts
+learn_minions({})
 ```
 
-The minion runs with your agent's model, step limit, and system prompt instead of the defaults.
-
-See [Agents](agents.md) for the full guide on agent configuration, discovery paths, and frontmatter fields.
-
-## Next steps
-
-- [Patterns](patterns.md) — "How do I...?" recipes for common workflows
-- [Agents](agents.md) — Creating and configuring named agents
-- [Reference](reference.md) — Complete tool and command schemas
-- [Architecture](architecture.md) — How pi-minions works under the hood
+The built-in skill text is packaged in source so users can learn the extension without packaged docs.

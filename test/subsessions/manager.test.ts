@@ -714,7 +714,7 @@ describe("SubsessionManager", () => {
       expect(bindExtensionsMock).toHaveBeenCalledOnce();
     });
 
-    it("passes proxy uiContext to bindExtensions when EventBus provided", async () => {
+    it("does not pass a forwarded uiContext when EventBus is provided", async () => {
       const bindExtensionsMock = vi.fn().mockResolvedValue(undefined);
 
       const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
@@ -736,9 +736,8 @@ describe("SubsessionManager", () => {
           }) as any,
       );
 
-      // Manager created with EventBus in beforeEach
       await manager.create({
-        id: "ui-proxy-test",
+        id: "ui-context-test",
         name: "test-minion",
         task: "do something",
         config: {
@@ -753,16 +752,9 @@ describe("SubsessionManager", () => {
         modelRegistry: {} as any,
       });
 
-      expect(bindExtensionsMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          uiContext: expect.objectContaining({
-            confirm: expect.any(Function),
-            select: expect.any(Function),
-            input: expect.any(Function),
-            editor: expect.any(Function),
-          }),
-        }),
-      );
+      const callArgs = bindExtensionsMock.mock.calls[0][0];
+      expect(callArgs.uiContext).toBeUndefined();
+      expect(callArgs.shutdownHandler).toEqual(expect.any(Function));
     });
 
     it("skips proxy uiContext when no EventBus", async () => {

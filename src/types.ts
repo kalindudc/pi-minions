@@ -64,23 +64,6 @@ export interface AgentNode {
   lastActivity?: string;
   /** Persistent activity history for observability widget */
   activityHistory?: string[];
-  /** True if moved to background (detached from foreground) */
-  detached?: boolean;
-  /** True if brought back to foreground (converted from bg to true fg) */
-  foregrounded?: boolean;
   /** Model used by this minion */
   model?: string;
-}
-
-export interface QueuedResult {
-  id: string;
-  name: string;
-  task: string;
-  output: string;
-  usage: UsageStats;
-  status: "pending" | "accepted";
-  completedAt: number;
-  duration: number;
-  exitCode: number;
-  error?: string;
 }
