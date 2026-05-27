@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-26
+
+- feat: migrate pi-minions to the `@earendil-works` package ecosystem
+- feat: remove background minions and acknowledgement nudges
+- chore: bump transitive `fast-xml-parser` and `postcss` dependencies — @dependabot[bot]
+
 ## [0.17.0] - 2026-04-26
 
 - feat: add `allowEphemeral` config to disable ephemeral minions — @Jomik
