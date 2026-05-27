@@ -1,4 +1,4 @@
-import type { ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getConfig } from "./config.js";
 import { logger } from "./logger.js";
 import type { SubsessionManager } from "./subsessions/manager.js";

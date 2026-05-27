@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMinionsHandler, parseMinionArgs } from "../../src/commands/minions.js";
 import { getMinionsSkill } from "../../src/skill.js";

@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Model } from "@mariozechner/pi-ai";
-import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { logger } from "./logger.js";
 import { generateId } from "./minions.js";
 import { SubsessionManager } from "./subsessions/manager.js";
@@ -76,7 +76,7 @@ export async function runMinionSession(
     name?: string;
     signal?: AbortSignal;
     modelRegistry: ModelRegistry;
-    customTools?: import("@mariozechner/pi-coding-agent").ToolDefinition[];
+    customTools?: import("@earendil-works/pi-coding-agent").ToolDefinition[];
     parentToolNames?: string[];
     toolSyncEnabled?: boolean;
     toolSyncMaxWait?: number;

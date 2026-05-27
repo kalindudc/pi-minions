@@ -13,7 +13,7 @@ import { createMockSession, type MockSessionConfig } from "./helpers/mock-sessio
 
 let currentMock: ReturnType<typeof createMockSession>;
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSession: async () => ({ session: currentMock.session }),
   DefaultResourceLoader: class {
     async reload() {}

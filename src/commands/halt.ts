@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { SubsessionManager } from "../subsessions/manager.js";
 import { abortAgents } from "../tools/halt.js";
 import type { AgentTree } from "../tree.js";

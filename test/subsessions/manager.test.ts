@@ -8,7 +8,7 @@ import { getMinionsDir } from "../../src/subsessions/paths.js";
 import type { MinionSessionMetadata } from "../../src/subsessions/types.js";
 
 // Mock must be at top level (hoisted)
-vi.mock("@mariozechner/pi-coding-agent", () => {
+vi.mock("@earendil-works/pi-coding-agent", () => {
   const mockSession = {
     subscribe: vi.fn().mockReturnValue(() => {}),
     steer: vi.fn().mockResolvedValue(undefined),
@@ -123,7 +123,7 @@ describe("SubsessionManager", () => {
       await new Promise((r) => setTimeout(r, 10));
 
       // Verify mock was called
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       expect(createAgentSession).toHaveBeenCalled();
     });
   });
@@ -328,7 +328,7 @@ describe("SubsessionManager", () => {
     it("does not invoke callbacks for events after agent_end", async () => {
       let capturedSubscriber: ((event: any) => void) | undefined;
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -404,7 +404,7 @@ describe("SubsessionManager", () => {
       let capturedSubscriber: ((event: any) => void) | undefined;
       const abortMock = vi.fn();
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -473,7 +473,7 @@ describe("SubsessionManager", () => {
     it("calls onUsageUpdate with stats from getSessionStats when session emits turn_end", async () => {
       let capturedSubscriber: ((event: any) => void) | undefined;
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -533,7 +533,7 @@ describe("SubsessionManager", () => {
     it("does not throw when onUsageUpdate is not provided and turn_end fires", async () => {
       let capturedSubscriber: ((event: any) => void) | undefined;
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -641,7 +641,7 @@ describe("SubsessionManager", () => {
       });
 
       // Then createAgentSession receives the customTools
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ customTools }));
     });
 
@@ -664,7 +664,7 @@ describe("SubsessionManager", () => {
       });
 
       // Then createAgentSession receives undefined for customTools
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       expect(createAgentSession).toHaveBeenCalledWith(
         expect.objectContaining({ customTools: undefined }),
       );
@@ -675,7 +675,7 @@ describe("SubsessionManager", () => {
     it("calls bindExtensions on the created session to trigger session_start", async () => {
       const bindExtensionsMock = vi.fn().mockResolvedValue(undefined);
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -717,7 +717,7 @@ describe("SubsessionManager", () => {
     it("does not pass a forwarded uiContext when EventBus is provided", async () => {
       const bindExtensionsMock = vi.fn().mockResolvedValue(undefined);
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -760,7 +760,7 @@ describe("SubsessionManager", () => {
     it("skips proxy uiContext when no EventBus", async () => {
       const bindExtensionsMock = vi.fn().mockResolvedValue(undefined);
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -847,7 +847,7 @@ describe("SubsessionManager", () => {
         { name: "slack_search", description: "Search" },
       ]);
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -891,7 +891,7 @@ describe("SubsessionManager", () => {
     it("proceeds immediately when parentToolNames only contains builtin tools", async () => {
       const getAllToolsMock = vi.fn().mockReturnValue([]);
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -938,7 +938,7 @@ describe("SubsessionManager", () => {
       // getAllTools always returns empty — the expected tool never registers
       const getAllToolsMock = vi.fn().mockReturnValue([]);
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -985,7 +985,7 @@ describe("SubsessionManager", () => {
       // getAllTools returns empty — if wait ran, it would poll for 5s
       const getAllToolsMock = vi.fn().mockReturnValue([]);
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       vi.mocked(createAgentSession).mockImplementationOnce(
         async () =>
           ({
@@ -1032,7 +1032,7 @@ describe("SubsessionManager", () => {
   describe("tool filtering via AgentConfig.tools", () => {
     it("calls setActiveToolsByName when config.tools is set", async () => {
       const manager = new SubsessionManager(tempDir, join(tempDir, "parent.jsonl"));
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       const mockSession = (await (createAgentSession as any)()).session;
       mockSession.setActiveToolsByName.mockClear();
 
@@ -1061,7 +1061,7 @@ describe("SubsessionManager", () => {
 
     it("does not call setActiveToolsByName when config.tools is undefined", async () => {
       const manager = new SubsessionManager(tempDir, join(tempDir, "parent.jsonl"));
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       const mockSession = (await (createAgentSession as any)()).session;
       mockSession.setActiveToolsByName.mockClear();
 

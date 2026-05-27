@@ -27,12 +27,12 @@ export interface CreateMinionSessionOptions {
   config: AgentConfig;
   spawnedBy: string;
   cwd: string;
-  modelRegistry: import("@mariozechner/pi-coding-agent").ModelRegistry;
+  modelRegistry: import("@earendil-works/pi-coding-agent").ModelRegistry;
   // biome-ignore lint/suspicious/noExplicitAny: external API type
-  parentModel?: import("@mariozechner/pi-ai").Model<any>;
+  parentModel?: import("@earendil-works/pi-ai").Model<any>;
   parentSystemPrompt?: string;
   signal?: AbortSignal;
-  customTools?: import("@mariozechner/pi-coding-agent").ToolDefinition[];
+  customTools?: import("@earendil-works/pi-coding-agent").ToolDefinition[];
   parentToolNames?: string[];
   toolSyncEnabled?: boolean;
   toolSyncMaxWait?: number;

@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MINION_NAMES, getConfig } from "./config.js";
 import type { AgentTree } from "./tree.js";
 import type { AgentConfig } from "./types.js";

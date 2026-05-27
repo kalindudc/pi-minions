@@ -6,7 +6,7 @@ export PI_MINIONS_DEBUG=1
 # to the local devDependency instead of the globally installed one.
 GLOBAL_PI=$(which -a pi 2>/dev/null | grep -v 'node_modules' | head -n 1)
 if [ -z "$GLOBAL_PI" ]; then
-  echo "Error: global pi not found. Install with: npm install -g @mariozechner/pi-coding-agent"
+  echo "Error: global pi not found. Install with: npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
   exit 1
 fi
 

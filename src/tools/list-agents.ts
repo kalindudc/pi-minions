@@ -1,4 +1,4 @@
-import type { AgentToolResult, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { discoverAgents } from "../agents.js";
 import { getConfig } from "../config.js";

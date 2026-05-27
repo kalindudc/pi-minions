@@ -29,14 +29,16 @@
     "LICENSE.md"
   ],
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "@sinclair/typebox": "*"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
-    "@mariozechner/pi-coding-agent": "^0.63.2",
-    "@mariozechner/pi-tui": "^0.63.0",
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
     "@sinclair/typebox": "^0.34.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

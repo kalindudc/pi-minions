@@ -1,9 +1,9 @@
 // MinionObservabilityWidget displays streaming minion activity as a compact log
 // Uses EventBus to receive real-time events from the minion
 
-import type { ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import type { TUI } from "@mariozechner/pi-tui";
-import { Key, matchesKey, Text } from "@mariozechner/pi-tui";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
+import { Key, matchesKey, Text } from "@earendil-works/pi-tui";
 import { getConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { AgentTree } from "../tree.js";

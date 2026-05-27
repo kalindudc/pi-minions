@@ -1,4 +1,4 @@
-import type { AgentToolResult, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import { logger } from "../logger.js";

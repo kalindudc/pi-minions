@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { discoverAgents } from "../agents.js";
 import { logger } from "../logger.js";
 import { defaultMinionTemplate } from "../minions.js";

@@ -1,4 +1,4 @@
-import type { ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus, MINION_PROGRESS_CHANNEL } from "../../src/subsessions/event-bus.js";
 import { hideObservability, showMinionObservability } from "../../src/subsessions/observability.js";

@@ -3,7 +3,7 @@ import type {
   AgentToolUpdateCallback,
   ExtensionAPI,
   ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import { discoverAgents } from "../agents.js";

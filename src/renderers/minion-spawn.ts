@@ -1,6 +1,6 @@
-import type { MessageRenderOptions, Theme } from "@mariozechner/pi-coding-agent";
-import type { Component } from "@mariozechner/pi-tui";
-import { Text } from "@mariozechner/pi-tui";
+import type { MessageRenderOptions, Theme } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { DEFAULT_SPINNER_FRAMES } from "../config.js";
 import { formatUsage } from "../render.js";
 import type { SpawnToolDetails } from "../tools/spawn.js";

@@ -2,8 +2,8 @@ import type {
   AgentToolResult,
   Theme,
   ToolRenderResultOptions,
-} from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { minionSpawnRenderer } from "./renderers/minion-spawn.js";
 import type { SpawnToolDetails } from "./tools/spawn.js";
 import type { UsageStats } from "./types.js";
